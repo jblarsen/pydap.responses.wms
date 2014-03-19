@@ -206,6 +206,8 @@ class WMSResponse(BaseResponse):
         # Calculate appropriate figure size.
         query = parse_dict_querystring(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
+        fill_method = environ.get('pydap.responses.wms.fill_method', 'contour')
+        assert fill_method in ['contourf', 'pcolor', 'pcolormesh', 'pcolorfast']
         w = float(query.get('WIDTH', 256))
         h = float(query.get('HEIGHT', 256))
         time = query.get('TIME')
@@ -230,7 +232,8 @@ class WMSResponse(BaseResponse):
                 names = [dataset] + layer.split('.')
                 grid = reduce(operator.getitem, names)
                 if is_valid(grid, dataset):
-                    self._plot_grid(dataset, grid, time, bbox, (w, h), ax, cmap)
+                    self._plot_grid(dataset, grid, time, bbox, (w, h), ax,
+                                    fill_method, cmap)
 
             # Save to buffer.
             ax.axis( [bbox[0], bbox[2], bbox[1], bbox[3]] )
@@ -244,9 +247,10 @@ class WMSResponse(BaseResponse):
                 buf, size = canvas.print_to_buffer()
                 im = Image.frombuffer('RGBA', size, buf, 'raw', 'RGBA', 0, 1)
                 # Find number of colors
-                ncolors = len(im.getcolors())
+                colors = im.getcolors(256)
                 # Only convert if the number of colors is less than 256
-                if ncolors <= 256:
+                if colors is not None:
+                    ncolors = len(colors)
                     # Get alpha band
                     alpha = im.split()[-1]
                     # Convert to paletted image
@@ -260,6 +264,8 @@ class WMSResponse(BaseResponse):
                     im.palette.palette = im.palette.palette[:3*(ncolors+1)]
                     im.save(output, 'png', optimize=False, transparency=ncolors)
                 else:
+                    #colors = im.getcolors(100000)
+                    #print len(colors)
                     canvas.print_png(output)
             else:
                 canvas.print_png(output)
@@ -267,7 +273,7 @@ class WMSResponse(BaseResponse):
             return [ output.getvalue() ]
         return serialize
 
-    def _plot_grid(self, dataset, grid, time, bbox, size, ax, cmap='jet'):
+    def _plot_grid(self, dataset, grid, time, bbox, size, ax, fill_method, cmap='jet'):
         # Get actual data range for levels.
         actual_range = self._get_actual_range(grid)
         V = np.linspace(actual_range[0], actual_range[1], 10)
@@ -294,8 +300,18 @@ class WMSResponse(BaseResponse):
         # First we "rewind" the data window to the begining of the bbox:
         lon = get_lon(grid, dataset)
         cyclic = hasattr(lon, 'modulo')
-        lon = np.asarray(lon[:])
-        lat = np.asarray(get_lat(grid, dataset)[:])
+        if fill_method == 'contourf':
+            lon = np.asarray(lon[:])
+            lat = np.asarray(get_lat(grid, dataset)[:])
+        else:
+            #assert hasattr(lon.attributes, 'bounds')
+            lon_bounds_name = lon.attributes['bounds']
+            lon_bounds = np.asarray(dataset[lon_bounds_name][:])
+            lon = np.concatenate((lon_bounds[:,0], lon_bounds[-1:,1]), 0)
+            lat = get_lat(grid, dataset)
+            lat_bounds_name = lat.attributes['bounds']
+            lat_bounds = np.asarray(dataset[lat_bounds_name][:])
+            lat = np.concatenate((lat_bounds[:,0], lat_bounds[-1:,1]), 0)
         while np.min(lon) > bbox[0]:
             lon -= 360.0
         # Now we plot the data window until the end of the bbox:
@@ -310,13 +326,17 @@ class WMSResponse(BaseResponse):
                 jstep = max(1, np.floor( (len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) ))
                 lons = lon[i0:i1:istep]
                 lats = lat[j0:j1:jstep]
-                data = np.asarray(grid.array[...,j0:j1:jstep,i0:i1:istep])
+                if fill_method == 'contourf':
+                    data = np.asarray(grid.array[...,j0:j1:jstep,i0:i1:istep])
+                else:
+                    data = np.asarray(grid.array[...,j0:j1-1:jstep,i0:i1-1:istep])
 
                 # Fix cyclic data.
                 if cyclic:
-                    lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
-                    data = np.ma.concatenate((
-                        data, grid.array[...,j0:j1:jstep,0:1]), -1)
+                    if fill_method == 'contourf':
+                        lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
+                        data = np.ma.concatenate((
+                            data, grid.array[...,j0:j1:jstep,0:1]), -1)
 
                 X, Y = np.meshgrid(lons, lats)
 
@@ -350,7 +370,12 @@ class WMSResponse(BaseResponse):
 
                 # plot
                 if data.any():
-                    ax.contourf(X, Y, data, V, cmap=get_cmap(cmap))
+                    plot_method = getattr(ax, fill_method)
+                    if fill_method == 'contourf':
+                        plot_method(X, Y, data, V, cmap=get_cmap(cmap))
+                    else:
+                        norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
+                        plot_method(X, Y, data, norm=norm, cmap=get_cmap(cmap))
             lon += 360.0
 
     def _get_capabilities(self, environ):
