@@ -25,6 +25,7 @@ except:
     pass
 
 from pydap.model import *
+from pydap.exceptions import ServerError
 from pydap.responses.lib import BaseResponse
 from pydap.util.template import GenshiRenderer, StringLoader, TemplateNotFound
 from pydap.util.safeeval import expr_eval
@@ -301,10 +302,14 @@ class WMSResponse(BaseResponse):
         lon = get_lon(grid, dataset)
         cyclic = hasattr(lon, 'modulo')
         if fill_method == 'contourf':
+            # contourf assumes that the lon/lat arrays are centered on data points
             lon = np.asarray(lon[:])
             lat = np.asarray(get_lat(grid, dataset)[:])
         else:
-            #assert hasattr(lon.attributes, 'bounds')
+            # the other fill methods assume that the lon/lat arrays are bounding
+            # the data cells
+            if not 'bounds' in lon.attributes:
+                raise ServerError('Bounds attributes missing in NetCDF file')
             lon_bounds_name = lon.attributes['bounds']
             lon_bounds = np.asarray(dataset[lon_bounds_name][:])
             lon = np.concatenate((lon_bounds[:,0], lon_bounds[-1:,1]), 0)
@@ -332,8 +337,7 @@ class WMSResponse(BaseResponse):
                     data = np.asarray(grid.array[...,j0:j1-1:jstep,i0:i1-1:istep])
 
                 # Fix cyclic data.
-                if cyclic:
-                    if fill_method == 'contourf':
+                if cyclic and fill_method == 'contourf':
                         lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
                         data = np.ma.concatenate((
                             data, grid.array[...,j0:j1:jstep,0:1]), -1)
