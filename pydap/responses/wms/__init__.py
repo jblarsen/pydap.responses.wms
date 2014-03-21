@@ -206,7 +206,7 @@ class WMSResponse(BaseResponse):
         # Calculate appropriate figure size.
         query = parse_dict_querystring(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
-        fill_method = environ.get('pydap.responses.wms.fill_method', 'contour')
+        fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
         assert fill_method in ['contourf', 'pcolor', 'pcolormesh', 'pcolorfast']
         w = float(query.get('WIDTH', 256))
         h = float(query.get('HEIGHT', 256))
@@ -372,10 +372,10 @@ class WMSResponse(BaseResponse):
                 if data.any():
                     plot_method = getattr(ax, fill_method)
                     if fill_method == 'contourf':
-                        plot_method(X, Y, data, V, cmap=get_cmap(cmap))
+                        plot_method(X, Y, data, V, cmap=get_cmap(cmap), antialiased=False)
                     else:
                         norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
-                        plot_method(X, Y, data, norm=norm, cmap=get_cmap(cmap))
+                        plot_method(X, Y, data, norm=norm, cmap=get_cmap(cmap), antialiased=False)
             lon += 360.0
 
     def _get_capabilities(self, environ):
