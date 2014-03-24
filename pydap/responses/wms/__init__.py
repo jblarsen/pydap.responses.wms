@@ -230,11 +230,26 @@ class WMSResponse(BaseResponse):
             layers = [layer for layer in query.get('LAYERS', '').split(',')
                     if layer] or [var.id for var in walk(dataset, GridType)]
             for layer in layers:
-                names = [dataset] + layer.split('.')
-                grid = reduce(operator.getitem, names)
-                if is_valid(grid, dataset):
-                    self._plot_grid(dataset, grid, time, bbox, (w, h), ax,
-                                    fill_method, cmap)
+                hlayers = layer.split('.')
+                vlayers = hlayers[-1].split(':')
+                if len(vlayers) == 1:
+                    # Plot scalar field
+                    names = [dataset] + hlayers
+                    grid = reduce(operator.getitem, names)
+                    if is_valid(grid, dataset):
+                        self._plot_grid(dataset, grid, time, bbox, (w, h), ax,
+                                        fill_method, cmap)
+                elif len(vlayers) == 2:
+                    # Plot vector field
+                    grids = []
+                    for vlayer in vlayers:
+                        names = [dataset] + hlayers[:-2] + [vlayer]
+                        grid = reduce(operator.getitem, names)
+                        if not is_valid(grid, dataset):
+                            raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
+                        grids.append(grid)
+                    self._plot_vector_grids(dataset, grids, time, bbox, (w, h),
+                                            ax)
 
             # Save to buffer.
             ax.axis( [bbox[0], bbox[2], bbox[1], bbox[3]] )
@@ -273,6 +288,116 @@ class WMSResponse(BaseResponse):
             if hasattr(dataset, 'close'): dataset.close()
             return [ output.getvalue() ]
         return serialize
+
+    def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax):
+        # Slice according to time request (WMS-T).
+        if time is not None:
+            values = np.array(get_time(grids[0], dataset))
+            l = np.zeros(len(values), bool)  # get no data by default
+
+            tokens = time.split(',')
+            for token in tokens:
+                if '/' in token: # range
+                    start, end = token.strip().split('/')
+                    start = iso8601.parse_date(start, default_timezone=None)
+                    end = iso8601.parse_date(end, default_timezone=None)
+                    l[(values >= start) & (values <= end)] = True
+                else:
+                    instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
+                    l[values == instant] = True
+        else:
+            l = None
+
+        # Plot the data over all the extension of the bbox.
+        # First we "rewind" the data window to the begining of the bbox:
+        lon = get_lon(grids[0], dataset)
+        cyclic = hasattr(lon, 'modulo')
+        # contourf assumes that the lon/lat arrays are centered on data points
+        lon = np.asarray(lon[:])
+        lat = np.asarray(get_lat(grids[0], dataset)[:])
+        while np.min(lon) > bbox[0]:
+            lon -= 360.0
+        # Now we plot the data window until the end of the bbox:
+        w, h = size
+        while np.min(lon) < bbox[2]:
+            # Retrieve only the data for the request bbox, and at the 
+            # optimal resolution (avoiding oversampling).
+            if len(lon.shape) == 1:
+                nthin = 36 # Make one vector for every nthin pixels
+                istep = max(1, int(np.floor( (nthin * len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
+                jstep = max(1, int(np.floor( (nthin * len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
+                # TODO: Figure out how to properly position vectors with
+                # nested domains.
+                #i0 = int(istep/3)
+                #j0 = int(jstep/3)
+                i0 = 0
+                j0 = 0
+                lon1 = lon[i0::istep]
+                lat1 = lat[j0::jstep]
+                # Find containing bound in reduced indices
+                i0r, i1r = find_containing_bounds(lon1, bbox[0], bbox[2])
+                j0r, j1r = find_containing_bounds(lat1, bbox[1], bbox[3])
+                # Convert reduced indices to global indices
+                i0 = istep*i0r
+                i1 = istep*i1r
+                j0 = jstep*j0r
+                j1 = jstep*j1r
+                lons = lon1[i0r:i1r]
+                lats = lat1[j0r:j1r]
+                data = [np.asarray(grids[0].array[...,j0:j1:jstep,i0:i1:istep]),
+                        np.asarray(grids[1].array[...,j0:j1:jstep,i0:i1:istep])]
+                # Fix cyclic data.
+                if cyclic:
+                    lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
+                    data[0] = np.ma.concatenate((
+                        data[0], grids[0].array[...,j0:j1:jstep,0:1]), -1)
+                    data[1] = np.ma.concatenate((
+                        data[1], grids[1].array[...,j0:j1:jstep,0:1]), -1)
+
+                X, Y = np.meshgrid(lons, lats)
+
+            elif len(lon.shape) == 2:
+                # TODO: Port 1D grid point selection to 2D case when 1D case
+                # is stable
+                i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
+                I, J = np.meshgrid(i, j)
+
+                xcond = (lon >= bbox[0]) & (lon <= bbox[2])
+                ycond = (lat >= bbox[1]) & (lat <= bbox[3])
+                if not xcond.any() or not ycond.any():
+                    lon += 360.0
+                    continue
+
+                i0, i1 = np.min(I[xcond]), np.max(I[xcond])
+                j0, j1 = np.min(J[ycond]), np.max(J[ycond])
+                istep = max(1, int(np.floor( (lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.max(lon)-np.amin(lon))) )))
+                jstep = max(1, int(np.floor( (lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.max(lat)-np.amin(lat))) )))
+
+                X = lon[j0:j1:jstep,i0:i1:istep]
+                Y = lat[j0:j1:jstep,i0:i1:istep]
+                data = [grids[0].array[...,j0:j1:jstep,i0:i1:istep],
+                        grids[0].array[...,j0:j1:jstep,i0:i1:istep]]
+
+            # Plot data.
+            if data[0].shape: 
+                # apply time slices
+                if l is not None:
+                    data = [np.asarray(data[0])[l],
+                            np.asarray(data[1])[l]]
+
+                # reduce dimensions and mask missing_values
+                data[0] = fix_data(data[0], grids[0].attributes)
+                data[1] = fix_data(data[1], grids[1].attributes)
+
+                # plot
+                if data[0].any():
+                    d = np.sqrt(data[0]**2 + data[1]**2)
+                    ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
+                              units='inches', scale=4.0, scale_units='inches',
+                              width=0.02, antialiased=False)
+
+            lon += 360.0
+
 
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, fill_method, cmap='jet'):
         # Get actual data range for levels.
@@ -338,9 +463,9 @@ class WMSResponse(BaseResponse):
 
                 # Fix cyclic data.
                 if cyclic and fill_method == 'contourf':
-                        lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
-                        data = np.ma.concatenate((
-                            data, grid.array[...,j0:j1:jstep,0:1]), -1)
+                    lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
+                    data = np.ma.concatenate((
+                        data, grid.array[...,j0:j1:jstep,0:1]), -1)
 
                 X, Y = np.meshgrid(lons, lats)
 
