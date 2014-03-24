@@ -22,23 +22,24 @@ def prepare_netcdf():
 
     # create bounds for 1d dimension variables
     for name, dim in f.dimensions.items():
-        var = f.variables[name]
-        if hasattr(var, 'bounds'): continue
-        ndims = len(var.shape)
-        # We currently only do this for 1d variables
-        if ndims > 1: continue
-        vert_dim = u'nv'
-        if vert_dim not in f.dimensions.keys():
-            nv = f.createDimension(vert_dim, 2*ndims)
-        bnds_name = name + '_bnds'
-        var.bounds = bnds_name
-        bdims = var.dimensions + (vert_dim,)
-        bounds = f.createVariable(bnds_name, var.dtype, bdims)
-        dv = 0.5*abs(var[-1]-var[0])/(len(var)-1)
-        lbounds = var[:] - dv
-        ubounds = var[:] + dv
-        bounds[:,0] = lbounds
-        bounds[:,1] = ubounds
+        if name in f.variables:
+            var = f.variables[name]
+            if hasattr(var, 'bounds'): continue
+            ndims = len(var.shape)
+            # We currently only do this for 1d variables
+            if ndims > 1: continue
+            vert_dim = u'nv'
+            if vert_dim not in f.dimensions.keys():
+                nv = f.createDimension(vert_dim, 2*ndims)
+            bnds_name = name + '_bnds'
+            var.bounds = bnds_name
+            bdims = var.dimensions + (vert_dim,)
+            bounds = f.createVariable(bnds_name, var.dtype, bdims)
+            dv = 0.5*abs(var[-1]-var[0])/(len(var)-1)
+            lbounds = var[:] - dv
+            ubounds = var[:] + dv
+            bounds[:,0] = lbounds
+            bounds[:,1] = ubounds
 
     f.close()
 
