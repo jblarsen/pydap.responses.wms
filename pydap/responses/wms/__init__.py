@@ -4,6 +4,7 @@ from StringIO import StringIO
 import re
 import operator
 import bisect
+import json
 
 from paste.request import construct_url, parse_dict_querystring
 from paste.httpexceptions import HTTPBadRequest
@@ -15,6 +16,7 @@ from matplotlib.cm import get_cmap
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 from matplotlib import rcParams
+from matplotlib.colors import from_levels_and_colors
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
 import iso8601
@@ -110,6 +112,15 @@ class WMSResponse(BaseResponse):
 
     renderer = GenshiRenderer(
             options={}, loader=StringLoader( {'capabilities.xml': DEFAULT_TEMPLATE} ))
+    with open('ifm_colors.json', 'r') as colorfile:
+        colors = json.load(colorfile)
+        for cname in colors:
+            levs = colors[cname]['levels']
+            cols = colors[cname]['colors']
+            extend = colors[cname]['extend']
+            cmap, norm = from_levels_and_colors(levs, cols, extend)
+            colors[cname] = {'cmap': cmap, 'norm': norm}
+        del levs, cols, extend, cmap, norm, cname
 
     def __init__(self, dataset):
         BaseResponse.__init__(self, dataset)
@@ -157,7 +168,7 @@ class WMSResponse(BaseResponse):
         query = parse_dict_querystring(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
         figsize = w/dpi, h/dpi
-        cmap = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+        cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
 
         def serialize(dataset):
             fix_map_attributes(dataset)
@@ -173,9 +184,15 @@ class WMSResponse(BaseResponse):
             names = [dataset] + layer.split('.')
             grid = reduce(operator.getitem, names)
 
-            actual_range = self._get_actual_range(grid)
-            norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
-            cb = ColorbarBase(ax, cmap=get_cmap(cmap), norm=norm,
+            if cmapname in self.colors:
+                norm = self.colors[cmapname]['norm']
+                cmap = self.colors[cmapname]['cmap']
+            else:
+                actual_range = self._get_actual_range(grid)
+                norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
+                cmap = get_cmap(cmapname)
+
+            cb = ColorbarBase(ax, cmap=cmap, norm=norm,
                     orientation='vertical')
             for tick in cb.ax.get_yticklabels():
                 tick.set_fontsize(14)
@@ -214,7 +231,7 @@ class WMSResponse(BaseResponse):
         time = query.get('TIME')
         figsize = w/dpi, h/dpi
         bbox = [float(v) for v in query.get('BBOX', '-180,-90,180,90').split(',')]
-        cmap = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+        cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
 
         def serialize(dataset):
             fix_map_attributes(dataset)
@@ -238,7 +255,7 @@ class WMSResponse(BaseResponse):
                     grid = reduce(operator.getitem, names)
                     if is_valid(grid, dataset):
                         self._plot_grid(dataset, grid, time, bbox, (w, h), ax,
-                                        fill_method, cmap)
+                                        fill_method, cmapname)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -397,11 +414,7 @@ class WMSResponse(BaseResponse):
             lon += 360.0
 
 
-    def _plot_grid(self, dataset, grid, time, bbox, size, ax, fill_method, cmap='jet'):
-        # Get actual data range for levels.
-        actual_range = self._get_actual_range(grid)
-        V = np.linspace(actual_range[0], actual_range[1], 10)
-
+    def _plot_grid(self, dataset, grid, time, bbox, size, ax, fill_method, cmapname='jet'):
         # Slice according to time request (WMS-T).
         if time is not None:
             values = np.array(get_time(grid, dataset))
@@ -498,11 +511,18 @@ class WMSResponse(BaseResponse):
                 # plot
                 if data.any():
                     plot_method = getattr(ax, fill_method)
-                    if fill_method == 'contourf':
-                        plot_method(X, Y, data, V, cmap=get_cmap(cmap), antialiased=False)
+                    if cmapname in self.colors:
+                        norm = self.colors[cmapname]['norm']
+                        cmap = self.colors[cmapname]['cmap']
                     else:
+                        # Get actual data range for levels.
+                        actual_range = self._get_actual_range(grid)
                         norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
-                        plot_method(X, Y, data, norm=norm, cmap=get_cmap(cmap), antialiased=False)
+                        cmap = get_cmap(cmapname)
+                    if fill_method == 'contourf':
+                        plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
+                    else:
+                        plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
             lon += 360.0
 
     def _get_capabilities(self, environ):
