@@ -164,7 +164,7 @@ class WMSResponse(BaseResponse):
         return BaseResponse.__call__(self, environ, start_response)
 
     def _get_colorbar(self, environ):
-        w, h = 90, 300
+        w, h = 100, 300
         query = parse_dict_querystring(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
         figsize = w/dpi, h/dpi
@@ -173,9 +173,12 @@ class WMSResponse(BaseResponse):
         def serialize(dataset):
             fix_map_attributes(dataset)
             fig = Figure(figsize=figsize, dpi=dpi)
-            fig.figurePatch.set_alpha(0.0)
-            ax = fig.add_axes([0.05, 0.05, 0.45, 0.85])
-            ax.axesPatch.set_alpha(0.5)
+            fig.set_facecolor('white')
+            fig.set_edgecolor('none')
+            ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
+            if asbool(query.get('TRANSPARENT', 'true')):
+                fig.figurePatch.set_alpha(0.0)
+                ax.axesPatch.set_alpha(0.5)
 
             # Plot requested grids.
             layers = [layer for layer in query.get('LAYERS', '').split(',')
@@ -187,17 +190,24 @@ class WMSResponse(BaseResponse):
             if cmapname in self.colors:
                 norm = self.colors[cmapname]['norm']
                 cmap = self.colors[cmapname]['cmap']
+                extend = cmap.colorbar_extend 
             else:
                 actual_range = self._get_actual_range(grid)
                 norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
                 cmap = get_cmap(cmapname)
+                extend = 'neither'
 
             cb = ColorbarBase(ax, cmap=cmap, norm=norm,
-                    orientation='vertical')
+                    orientation='vertical', extend=extend)
             for tick in cb.ax.get_yticklabels():
                 tick.set_fontsize(14)
-                tick.set_color('white')
+                tick.set_color('black')
                 #tick.set_fontweight('bold')
+
+            # Decorate colorbar
+            units = grid.attributes['units']
+            long_name = grid.attributes['long_name'].capitalize()
+            ax.set_ylabel('%s [%s]' % (long_name, units))
 
             # Save to buffer.
             canvas = FigureCanvas(fig)
