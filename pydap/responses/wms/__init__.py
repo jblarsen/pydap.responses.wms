@@ -435,6 +435,8 @@ class WMSResponse(BaseResponse):
                 I, J = np.meshgrid(i, j)
                 xcond = (lon1 >= bbox[0]) & (lon1 <= bbox[2])
                 ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
+                if not xcond.any() or not ycond.any():
+                    return
                 i0r = max(np.min(I[xcond])-2, 0)
                 i1r = min(np.max(I[xcond])+3, xcond.shape[1])
                 j0r = max(np.min(J[ycond])-2, 0)
