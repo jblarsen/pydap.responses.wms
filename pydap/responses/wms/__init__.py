@@ -369,8 +369,6 @@ class WMSResponse(BaseResponse):
             if len(lon.shape) == 1:
                 istep = max(1, int(np.floor( (nthin * len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
                 jstep = max(1, int(np.floor( (nthin * len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
-                # TODO: Figure out how to properly position vectors with
-                # nested domains.
                 #i0 = int(istep/3)
                 #j0 = int(jstep/3)
                 i0 = 0
@@ -579,13 +577,16 @@ class WMSResponse(BaseResponse):
                     if cmapname in self.colors:
                         norm = self.colors[cmapname]['norm']
                         cmap = self.colors[cmapname]['cmap']
+                        levels = norm.boundaries
                     else:
                         # Get actual data range for levels.
                         actual_range = self._get_actual_range(grid)
                         norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
                         cmap = get_cmap(cmapname)
+                        levels = None
                     if fill_method == 'contourf':
-                        plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
+                        plot_method(X, Y, data, norm=norm, cmap=cmap, 
+                                    levels=levels, antialiased=False,)
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
             if not is_latlong:
