@@ -5,9 +5,11 @@ import re
 import operator
 import bisect
 import json
+import time
+from rfc822 import parsedate
 
 from paste.request import construct_url, parse_dict_querystring
-from paste.httpexceptions import HTTPBadRequest
+from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -164,6 +166,21 @@ class WMSResponse(BaseResponse):
             self.headers.append( ('Content-type', 'image/png') )
         else:
             raise HTTPBadRequest('Invalid REQUEST "%s"' % type_)
+
+        # Caching
+        max_age = environ.get('pydap.responses.wms.max_age', None)
+        if max_age is not None:
+            self.headers.append( ('Cache-Control', 'public, max-age=%i' % int(max_age)) )
+        if 'HTTP_IF_MODIFIED_SINCE' in environ:
+            cache_control = environ.get('HTTP_CACHE_CONTROL')
+            if cache_control != 'no-cache':
+                if_modified_since = time.mktime(parsedate(environ.get('HTTP_IF_MODIFIED_SINCE')))
+                for header in environ['pydap.headers']:
+                    if 'Last-modified' in header:
+                        last_modified = time.mktime(parsedate(header[1]))
+                        if if_modified_since <= last_modified:
+                            raise HTTPNotModified
+
 
         return BaseResponse.__call__(self, environ, start_response)
 
