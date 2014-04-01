@@ -169,8 +169,14 @@ class WMSResponse(BaseResponse):
 
         # Caching
         max_age = environ.get('pydap.responses.wms.max_age', None)
+        s_maxage = environ.get('pydap.responses.wms.s_maxage', None)
+        cc_str = 'public'
         if max_age is not None:
-            self.headers.append( ('Cache-Control', 'public, max-age=%i' % int(max_age)) )
+            cc_str = cc_str + ', max-age=%i' % int(max_age)
+        if s_maxage is not None:
+            cc_str = cc_str + ', s-maxage=%i' % int(s_maxage)
+        if max_age is not None or s_maxage is not None:
+            self.headers.append( ('Cache-Control', cc_str) )
         if 'HTTP_IF_MODIFIED_SINCE' in environ:
             cache_control = environ.get('HTTP_CACHE_CONTROL')
             if cache_control != 'no-cache':
