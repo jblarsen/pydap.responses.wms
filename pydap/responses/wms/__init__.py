@@ -576,6 +576,8 @@ class WMSResponse(BaseResponse):
                     lon += 360.0
                     continue
 
+                if not xcond.any() or not ycond.any():
+                    return
                 i0 = max(np.min(I[xcond])-2, 0)
                 i1 = min(np.max(I[xcond])+3, xcond.shape[1])
                 j0 = max(np.min(J[ycond])-2, 0)
