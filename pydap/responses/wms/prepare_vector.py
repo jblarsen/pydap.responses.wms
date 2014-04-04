@@ -17,7 +17,10 @@ def prepare_netcdf():
     whitelist = ['long_name', 'units', '_FillValue', 'missing_value']
     u = f.variables[uname]
     v = f.variables[vname]
-    fill_value = u.missing_value
+    try:
+        fill_value = u.missing_value
+    except:
+        fill_value = u._FillValue
     uv = np.ma.sqrt(u[:]**2 + v[:]**2)
     uvname = "%s_%s" % (uname, vname)
     uvf = f.createVariable(uvname, u.dtype, u.dimensions, fill_value=fill_value)

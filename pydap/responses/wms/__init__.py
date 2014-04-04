@@ -17,6 +17,7 @@ from matplotlib.figure import Figure
 from matplotlib.cm import get_cmap
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
+from matplotlib.colors import BoundaryNorm
 from matplotlib import rcParams
 from matplotlib.colors import from_levels_and_colors
 rcParams['xtick.labelsize'] = 'small'
@@ -221,6 +222,8 @@ class WMSResponse(BaseResponse):
             else:
                 actual_range = self._get_actual_range(grid)
                 norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
+                # FIXME: Implement boundary norm with arange(actual_range[0],...)
+                #norm = BoundaryNorm([-1, -0.5, -0.2, 0, 0.2, 0.5, 1])
                 cmap = get_cmap(cmapname)
                 extend = 'neither'
 
@@ -232,9 +235,10 @@ class WMSResponse(BaseResponse):
                 #tick.set_fontweight('bold')
 
             # Decorate colorbar
-            units = grid.attributes['units']
-            long_name = grid.attributes['long_name'].capitalize()
-            ax.set_ylabel('%s [%s]' % (long_name, units))
+            if 'units' in grid.attributes and 'long_name' in grid.attributes:
+                units = grid.attributes['units']
+                long_name = grid.attributes['long_name'].capitalize()
+                ax.set_ylabel('%s [%s]' % (long_name, units))
 
             # Save to buffer.
             canvas = FigureCanvas(fig)
@@ -375,7 +379,8 @@ class WMSResponse(BaseResponse):
         if do_proj:
             p_base = pyproj.Proj(init=base_srs)
             p_query = pyproj.Proj(init=srs)
-            lon, lat = np.meshgrid(lon, lat)
+            if len(lon.shape) == 1:
+                lon, lat = np.meshgrid(lon, lat)
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
             is_latlong = p_query.is_latlong()
         else:
@@ -531,7 +536,8 @@ class WMSResponse(BaseResponse):
         if do_proj:
             p_base = pyproj.Proj(init=base_srs)
             p_query = pyproj.Proj(init=srs)
-            lon, lat = np.meshgrid(lon, lat)
+            if len(lon.shape) == 1:
+                lon, lat = np.meshgrid(lon, lat)
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
             is_latlong = p_query.is_latlong()
         else:
@@ -690,9 +696,12 @@ def is_valid(grid, dataset):
 def get_lon(grid, dataset):
     def check_attrs(var):
         if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
-            var.attributes.get('axis', '').lower() == 'x' or
             var.attributes.get('standard_name', '') == 'longitude'):
             return var
+        #if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
+        #    var.attributes.get('axis', '').lower() == 'x' or
+        #    var.attributes.get('standard_name', '') == 'longitude'):
+        #    return var
 
     # check maps first
     for dim in grid.maps.values():
@@ -711,8 +720,11 @@ def get_lon(grid, dataset):
 
 def get_lat(grid, dataset):
     def check_attrs(var):
+        #if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
+        #    var.attributes.get('axis', '').lower() == 'y' or
+        #    var.attributes.get('standard_name', '') == 'latitude'):
+        #    return var
         if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
-            var.attributes.get('axis', '').lower() == 'y' or
             var.attributes.get('standard_name', '') == 'latitude'):
             return var
 
