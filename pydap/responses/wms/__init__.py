@@ -222,8 +222,6 @@ class WMSResponse(BaseResponse):
             else:
                 actual_range = self._get_actual_range(grid)
                 norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
-                # FIXME: Implement boundary norm with arange(actual_range[0],...)
-                #norm = BoundaryNorm([-1, -0.5, -0.2, 0, 0.2, 0.5, 1])
                 cmap = get_cmap(cmapname)
                 extend = 'neither'
 
@@ -615,8 +613,10 @@ class WMSResponse(BaseResponse):
                         # Get actual data range for levels.
                         actual_range = self._get_actual_range(grid)
                         norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
+                        ncolors = 15
+                        dlev = (actual_range[1] - actual_range[0])/ncolors
+                        levels = np.arange(actual_range[0], actual_range[1]+dlev, dlev)
                         cmap = get_cmap(cmapname)
-                        levels = None
                     if fill_method == 'contourf':
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=levels, antialiased=False,)
