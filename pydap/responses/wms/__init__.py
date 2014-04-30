@@ -227,16 +227,21 @@ class WMSResponse(BaseResponse):
 
             cb = ColorbarBase(ax, cmap=cmap, norm=norm,
                     orientation='vertical', extend=extend)
+            fontsize = 0
             for tick in cb.ax.get_yticklabels():
-                tick.set_fontsize(14)
+                txt = tick.get_text()
+                ntxt = len(txt)
+                fontsize = max(int(0.50*w/ntxt), fontsize)
+                fontsize = min(14, fontsize)
+            for tick in cb.ax.get_yticklabels():
+                tick.set_fontsize(fontsize)
                 tick.set_color('black')
-                #tick.set_fontweight('bold')
 
             # Decorate colorbar
             if 'units' in grid.attributes and 'long_name' in grid.attributes:
                 units = grid.attributes['units']
                 long_name = grid.attributes['long_name'].capitalize()
-                ax.set_ylabel('%s [%s]' % (long_name, units))
+                ax.set_ylabel('%s [%s]' % (long_name, units), fontsize=fontsize)
 
             # Save to buffer.
             canvas = FigureCanvas(fig)
@@ -567,6 +572,7 @@ class WMSResponse(BaseResponse):
                     lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
                     data = np.ma.concatenate((
                         data, grid.array[...,j0:j1:jstep,0:1]), -1)
+                # FIXME: convert lon[0:1] to local proj instead
 
                 X, Y = np.meshgrid(lons, lats)
 
@@ -592,12 +598,15 @@ class WMSResponse(BaseResponse):
                 X = lon[j0:j1:jstep,i0:i1:istep]
                 Y = lat[j0:j1:jstep,i0:i1:istep]
                 data = grid.array[...,j0:j1:jstep,i0:i1:istep]
+                # FIXME: Greenwich Meridian bug around here...
 
             # Plot data.
             if data.shape: 
                 # apply time slices
                 if l is not None:
                     data = np.asarray(data)[l]
+                else:
+                    data = np.asarray(data)
 
                 # reduce dimensions and mask missing_values
                 data = fix_data(data, grid.attributes)
