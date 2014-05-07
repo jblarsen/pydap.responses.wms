@@ -637,11 +637,12 @@ class WMSResponse(BaseResponse):
                     if fill_method == 'contourf':
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=levels, antialiased=False)
+                        cs = ax.contour(X, Y, data, colors='w', levels=levels, 
+                                    antialiased=False)
+                        ax.clabel(cs, inline=1, fontsize=10)
                     elif fill_method == 'contour':
-                        ax.contourf(X, Y, data, norm=norm, cmap=cmap, 
-                                    levels=levels, antialiased=False)
-                        cs = plot_method(X, Y, data, colors='w', levels=levels, 
-                                    antialiased=True)
+                        cs = plot_method(X, Y, data, colors='black', levels=levels, 
+                                    antialiased=False)
                         ax.clabel(cs, inline=1, fontsize=10)
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
