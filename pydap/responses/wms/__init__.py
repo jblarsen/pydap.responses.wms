@@ -23,6 +23,7 @@ from matplotlib.colors import from_levels_and_colors
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
 import iso8601
+#import netcdftime
 import coards
 import pyproj
 try:
@@ -119,7 +120,8 @@ class WMSResponse(BaseResponse):
 
     renderer = GenshiRenderer(
             options={}, loader=StringLoader( {'capabilities.xml': DEFAULT_TEMPLATE} ))
-    with open('ifm_colors.json', 'r') as colorfile:
+    #with open('ifm_colors.json', 'r') as colorfile:
+    with open('/home/prod/pydap-server/ifm_colors.json', 'r') as colorfile:
         colors = json.load(colorfile)
         for cname in colors:
             levs = colors[cname]['levels']
@@ -497,18 +499,20 @@ class WMSResponse(BaseResponse):
         # Slice according to time request (WMS-T).
         if time is not None:
             values = np.array(get_time(grid, dataset))
-            l = np.zeros(len(values), bool)  # get no data by default
-
-            tokens = time.split(',')
-            for token in tokens:
-                if '/' in token: # range
-                    start, end = token.strip().split('/')
-                    start = iso8601.parse_date(start, default_timezone=None)
-                    end = iso8601.parse_date(end, default_timezone=None)
-                    l[(values >= start) & (values <= end)] = True
-                else:
-                    instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                    l[values == instant] = True
+            if len(values.shape) == 0:
+                l = None
+            else:
+                l = np.zeros(values.shape, bool)  # get no data by default
+                tokens = time.split(',')
+                for token in tokens:
+                    if '/' in token: # range
+                        start, end = token.strip().split('/')
+                        start = iso8601.parse_date(start, default_timezone=None)
+                        end = iso8601.parse_date(end, default_timezone=None)
+                        l[(values >= start) & (values <= end)] = True
+                    else:
+                        instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
+                        l[values == instant] = True
         else:
             l = None
 
@@ -755,8 +759,10 @@ def get_lat(grid, dataset):
 def get_time(grid, dataset):
     for dim in grid.maps.values():
         if ' since ' in dim.attributes.get('units', ''):
+            #calender = getattr(dim, 'units', 'standard')
             try:
                 return [coards.parse(value, dim.units) for value in np.asarray(dim)]
+                #return netcdftime.num2date(np.asarray(dim), dim.units, calendar)
             except:
                 pass
 
