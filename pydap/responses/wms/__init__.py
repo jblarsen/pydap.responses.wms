@@ -637,11 +637,13 @@ class WMSResponse(BaseResponse):
                     if fill_method == 'contourf':
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=levels, antialiased=False)
-                        cs = ax.contour(X, Y, data, colors='w', levels=levels, 
+                        newlevels = _contour_levels(levels, cmap.colorbar_extend)
+                        cs = ax.contour(X, Y, data, colors='w', levels=newlevels, 
                                     antialiased=False)
                         ax.clabel(cs, inline=1, fontsize=10)
                     elif fill_method == 'contour':
-                        cs = plot_method(X, Y, data, colors='black', levels=levels, 
+                        newlevels = _contour_levels(levels, cmap.colorbar_extend)
+                        cs = plot_method(X, Y, data, colors='black', levels=newlevels, 
                                     antialiased=False)
                         ax.clabel(cs, inline=1, fontsize=10)
                     else:
@@ -968,4 +970,16 @@ def rotate_vector(srs,uin,vin,lons,lats,returnxy=False):
         return uout,vout,x,y
     else:
         return uout,vout
+
+def _contour_levels(levels, extend):
+    """\
+    Modifies levels for contouring so that we do not contour
+    upper and lower bounds.
+    """
+    outlevels = levels[:]
+    if extend in ['min', 'neither']:
+        outlevels = outlevels[:-1]
+    if extend in ['max', 'neither']:
+        outlevels = outlevels[1:]
+    return outlevels
 
