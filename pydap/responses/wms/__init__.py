@@ -270,7 +270,8 @@ class WMSResponse(BaseResponse):
         query = parse_dict_querystring(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
         fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
-        assert fill_method in ['contourf', 'pcolor', 'pcolormesh', 'pcolorfast']
+        assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
+                               'pcolorfast']
         w = float(query.get('WIDTH', 256))
         h = float(query.get('HEIGHT', 256))
         time = query.get('TIME')
@@ -278,6 +279,10 @@ class WMSResponse(BaseResponse):
         bbox = [float(v) for v in query.get('BBOX', '-180,-90,180,90').split(',')]
         cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
         srs = query.get('SRS', 'EPSG:4326')
+        # Override fill_method by user requested style
+        styles = query.get('STYLES', fill_method)
+        if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
+            fill_method = styles
 
         def serialize(dataset):
             fix_map_attributes(dataset)
@@ -519,7 +524,7 @@ class WMSResponse(BaseResponse):
         # First we "rewind" the data window to the begining of the bbox:
         lon = get_lon(grid, dataset)
         cyclic = hasattr(lon, 'modulo')
-        if fill_method == 'contourf':
+        if fill_method in ['contour', 'contourf']:
             # contourf assumes that the lon/lat arrays are centered on data points
             lon = np.asarray(lon[:])
             lat = np.asarray(get_lat(grid, dataset)[:])
@@ -565,13 +570,13 @@ class WMSResponse(BaseResponse):
                 jstep = 1
                 lons = lon[i0:i1:istep]
                 lats = lat[j0:j1:jstep]
-                if fill_method == 'contourf':
+                if fill_method in ['contour', 'contourf']:
                     data = np.asarray(grid.array[...,j0:j1:jstep,i0:i1:istep])
                 else:
                     data = np.asarray(grid.array[...,j0:j1-1:jstep,i0:i1-1:istep])
 
                 # Fix cyclic data.
-                if cyclic and is_latlong and fill_method == 'contourf':
+                if cyclic and is_latlong and fill_method in ['contour', 'contourf']:
                     lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
                     data = np.ma.concatenate((
                         data, grid.array[...,j0:j1:jstep,0:1]), -1)
@@ -631,7 +636,10 @@ class WMSResponse(BaseResponse):
                         cmap = get_cmap(cmapname)
                     if fill_method == 'contourf':
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
-                                    levels=levels, antialiased=False,)
+                                    levels=levels, antialiased=False)
+                    elif fill_method == 'contour':
+                        cs = plot_method(X, Y, data, levels=levels, antialiased=True)
+                        ax.clabel(cs, inline=1, fontsize=10)
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
             if not is_latlong:
