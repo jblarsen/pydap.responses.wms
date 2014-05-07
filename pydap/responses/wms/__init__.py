@@ -23,8 +23,7 @@ from matplotlib.colors import from_levels_and_colors
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
 import iso8601
-#import netcdftime
-import coards
+import netcdftime
 import pyproj
 try:
     from PIL import Image
@@ -759,10 +758,9 @@ def get_lat(grid, dataset):
 def get_time(grid, dataset):
     for dim in grid.maps.values():
         if ' since ' in dim.attributes.get('units', ''):
-            #calender = getattr(dim, 'units', 'standard')
+            calendar = dim.attributes.get('calendar', 'standard')
             try:
-                return [coards.parse(value, dim.units) for value in np.asarray(dim)]
-                #return netcdftime.num2date(np.asarray(dim), dim.units, calendar)
+                return netcdftime.num2date(np.asarray(dim), dim.units, calendar)
             except:
                 pass
 
