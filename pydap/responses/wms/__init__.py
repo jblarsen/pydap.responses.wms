@@ -638,7 +638,10 @@ class WMSResponse(BaseResponse):
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=levels, antialiased=False)
                     elif fill_method == 'contour':
-                        cs = plot_method(X, Y, data, levels=levels, antialiased=True)
+                        ax.contourf(X, Y, data, norm=norm, cmap=cmap, 
+                                    levels=levels, antialiased=False)
+                        cs = plot_method(X, Y, data, colors='w', levels=levels, 
+                                    antialiased=True)
                         ax.clabel(cs, inline=1, fontsize=10)
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
