@@ -392,7 +392,8 @@ class WMSResponse(BaseResponse):
                 lon, lat = np.meshgrid(lon, lat)
             dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            lon = np.where(lon >= 0.0, lon, lon+dlon)
+            if bbox[0] > bbox[2]:
+                lon = np.where(lon >= 0.0, lon, lon+dlon)
         else:
             dlon = 360.0
 
@@ -401,6 +402,8 @@ class WMSResponse(BaseResponse):
         # Now we plot the data window until the end of the bbox:
         w, h = size
         while np.min(lon) < bbox[2]:
+            lon_save = lon[:]
+            lat_save = lat[:]
             # Retrieve only the data for the request bbox, and at the 
             # optimal resolution (avoiding oversampling).
             nthin = 36 # Make one vector for every nthin pixels
@@ -445,8 +448,8 @@ class WMSResponse(BaseResponse):
                     lon += dlon
                     continue
 
-                istep = max(1, int(np.floor( (nthin * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.max(lon)-np.amin(lon))) )))
-                jstep = max(1, int(np.floor( (nthin * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.max(lat)-np.amin(lat))) )))
+                istep = max(1, int(np.floor( (nthin * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
+                jstep = max(1, int(np.floor( (nthin * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
                 i0 = 0
                 j0 = 0
                 lon1 = lon[j0::jstep,i0::istep]
@@ -494,6 +497,8 @@ class WMSResponse(BaseResponse):
                     ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
                               units='inches', scale=4.0, scale_units='inches',
                               width=0.02, antialiased=False)
+            lon = lon_save
+            lat = lat_save
             lon += dlon
 
 
@@ -549,7 +554,8 @@ class WMSResponse(BaseResponse):
                 lon, lat = np.meshgrid(lon, lat)
             dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            lon = np.where(lon >= 0.0, lon, lon+dlon)
+            if bbox[0] > bbox[2]:
+                lon = np.where(lon >= 0.0, lon, lon+dlon)
         else:
             dlon = 360.0
 
