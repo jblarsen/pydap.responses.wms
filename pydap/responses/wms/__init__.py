@@ -392,7 +392,7 @@ class WMSResponse(BaseResponse):
                 lon, lat = np.meshgrid(lon, lat)
             dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            if bbox[0] > bbox[2]:
+            if bbox[0] > bbox[2] or cyclic:
                 lon = np.where(lon >= 0.0, lon, lon+dlon)
         else:
             dlon = 360.0
@@ -554,7 +554,7 @@ class WMSResponse(BaseResponse):
                 lon, lat = np.meshgrid(lon, lat)
             dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            if bbox[0] > bbox[2]:
+            if bbox[0] > bbox[2] or cyclic:
                 lon = np.where(lon >= 0.0, lon, lon+dlon)
         else:
             dlon = 360.0
