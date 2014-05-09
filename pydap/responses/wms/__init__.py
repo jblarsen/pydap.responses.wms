@@ -390,13 +390,14 @@ class WMSResponse(BaseResponse):
             p_query = pyproj.Proj(init=srs)
             if len(lon.shape) == 1:
                 lon, lat = np.meshgrid(lon, lat)
+            dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            is_latlong = p_query.is_latlong()
+            lon = np.where(lon >= 0.0, lon, lon+dlon)
         else:
-            is_latlong = True
+            dlon = 360.0
 
-        while is_latlong and np.min(lon) > bbox[0]:
-            lon -= 360.0
+        while np.min(lon) > bbox[0]:
+            lon -= dlon
         # Now we plot the data window until the end of the bbox:
         w, h = size
         while np.min(lon) < bbox[2]:
@@ -425,8 +426,8 @@ class WMSResponse(BaseResponse):
                 data = [np.asarray(grids[0].array[...,j0:j1:jstep,i0:i1:istep]),
                         np.asarray(grids[1].array[...,j0:j1:jstep,i0:i1:istep])]
                 # Fix cyclic data.
-                if cyclic and is_latlong:
-                    lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
+                if cyclic:
+                    lons = np.ma.concatenate((lons, lon[0:1] + dlon), 0)
                     data[0] = np.ma.concatenate((
                         data[0], grids[0].array[...,j0:j1:jstep,0:1]), -1)
                     data[1] = np.ma.concatenate((
@@ -440,8 +441,8 @@ class WMSResponse(BaseResponse):
 
                 xcond = (lon >= bbox[0]) & (lon <= bbox[2])
                 ycond = (lat >= bbox[1]) & (lat <= bbox[3])
-                if is_latlong and (not xcond.any() or not ycond.any()):
-                    lon += 360.0
+                if (not xcond.any() or not ycond.any()):
+                    lon += dlon
                     continue
 
                 istep = max(1, int(np.floor( (nthin * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.max(lon)-np.amin(lon))) )))
@@ -493,10 +494,7 @@ class WMSResponse(BaseResponse):
                     ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
                               units='inches', scale=4.0, scale_units='inches',
                               width=0.02, antialiased=False)
-            if not is_latlong:
-                break
-            else:
-                lon += 360.0
+            lon += dlon
 
 
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method, cmapname='jet'):
@@ -549,13 +547,17 @@ class WMSResponse(BaseResponse):
             p_query = pyproj.Proj(init=srs)
             if len(lon.shape) == 1:
                 lon, lat = np.meshgrid(lon, lat)
+            dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
             lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            is_latlong = p_query.is_latlong()
+            lon = np.where(lon >= 0.0, lon, lon+dlon)
         else:
-            is_latlong = True
+            dlon = 360.0
 
-        while is_latlong and np.min(lon) > bbox[0]:
-            lon -= 360.0
+        # Determine how much to increment for one full go around the globe
+
+        while np.min(lon) > bbox[0]:
+            lon -= dlon
+
         # Now we plot the data window until the end of the bbox:
         w, h = size
         while np.min(lon) < bbox[2]:
@@ -576,11 +578,10 @@ class WMSResponse(BaseResponse):
                     data = np.asarray(grid.array[...,j0:j1-1:jstep,i0:i1-1:istep])
 
                 # Fix cyclic data.
-                if cyclic and is_latlong and fill_method in ['contour', 'contourf']:
-                    lons = np.ma.concatenate((lons, lon[0:1] + 360.0), 0)
+                if cyclic and fill_method in ['contour', 'contourf']:
+                    lons = np.ma.concatenate((lons, lon[0:1] + dlon), 0)
                     data = np.ma.concatenate((
                         data, grid.array[...,j0:j1:jstep,0:1]), -1)
-                # FIXME: convert lon[0:1] to local proj instead
 
                 X, Y = np.meshgrid(lons, lats)
 
@@ -590,14 +591,39 @@ class WMSResponse(BaseResponse):
 
                 xcond = (lon >= bbox[0]) & (lon <= bbox[2])
                 ycond = (lat >= bbox[1]) & (lat <= bbox[3])
-                if is_latlong and (not xcond.any() or not ycond.any()):
-                    lon += 360.0
+                if (not xcond.any() or not ycond.any()):
+                    lon += dlon
                     continue
+                i0 = np.min(I[xcond])-2
+                i1 = np.max(I[xcond])+3
+                lower = False
+                lon_save = lon[:]
+                lat_save = lat[:]
+                if cyclic:
+                    if i0 < 0:
+                        lon = np.concatenate((lon[:,i0:]-dlon, lon), axis=1)
+                        lat = np.concatenate((lat[:,i0:], lat), axis=1)
+                        ii = xcond.shape[1] + i0
+                        data = np.ma.concatenate((grid.array[...,ii:], 
+                                                  grid.array[...]), axis=-1)
+                        i1 = i1 - i0
+                        i0 = 0
+                        lower = True
+                    if i1 > xcond.shape[1]:
+                        di = i1 - xcond.shape[1]
+                        lon = np.concatenate((lon, lon[:,:di]+dlon), axis=1)
+                        lat = np.concatenate((lat, lat[:,:di]), axis=1)
+                        if lower:
+                            data = np.ma.concatenate((data[...], 
+                                                      data[...,:di]), axis=-1)
+                        else:
+                            data = np.ma.concatenate((grid.array[...], 
+                                                      grid.array[...,:di]), axis=-1)
+                            lower = True
+                else:
+                    i0 = max(i0, 0)
+                    i1 = min(i1, xcond.shape[1])
 
-                if not xcond.any() or not ycond.any():
-                    return
-                i0 = max(np.min(I[xcond])-2, 0)
-                i1 = min(np.max(I[xcond])+3, xcond.shape[1])
                 j0 = max(np.min(J[ycond])-2, 0)
                 j1 = min(np.max(J[ycond])+3, ycond.shape[0])
                 istep = max(1, int(np.floor( (lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.max(lon)-np.amin(lon))) )))
@@ -605,8 +631,10 @@ class WMSResponse(BaseResponse):
 
                 X = lon[j0:j1:jstep,i0:i1:istep]
                 Y = lat[j0:j1:jstep,i0:i1:istep]
-                data = grid.array[...,j0:j1:jstep,i0:i1:istep]
-                # FIXME: Greenwich Meridian bug around here...
+                if lower:
+                    data = data[...,j0:j1:jstep,i0:i1:istep]
+                else:
+                    data = grid.array[...,j0:j1:jstep,i0:i1:istep]
 
             # Plot data.
             if data.shape: 
@@ -648,10 +676,9 @@ class WMSResponse(BaseResponse):
                         ax.clabel(cs, inline=1, fontsize=10)
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
-            if not is_latlong:
-                break
-            else:
-                lon += 360.0
+            lon = lon_save
+            lat = lat_save
+            lon += dlon
 
     def _get_capabilities(self, environ):
         def serialize(dataset):
