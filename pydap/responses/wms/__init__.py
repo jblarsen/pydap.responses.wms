@@ -279,6 +279,7 @@ class WMSResponse(BaseResponse):
         bbox = [float(v) for v in query.get('BBOX', '-180,-90,180,90').split(',')]
         cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
         srs = query.get('SRS', 'EPSG:4326')
+        if srs == 'EPSG:900913': srs = 'EPSG:3857'
         # Override fill_method by user requested style
         styles = query.get('STYLES', fill_method)
         if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
@@ -567,6 +568,8 @@ class WMSResponse(BaseResponse):
         # Now we plot the data window until the end of the bbox:
         w, h = size
         while np.min(lon) < bbox[2]:
+            lon_save = lon[:]
+            lat_save = lat[:]
             # Retrieve only the data for the request bbox, and at the 
             # optimal resolution (avoiding oversampling).
             if len(lon.shape) == 1:
@@ -603,8 +606,6 @@ class WMSResponse(BaseResponse):
                 i0 = np.min(I[xcond])-2
                 i1 = np.max(I[xcond])+3
                 lower = False
-                lon_save = lon[:]
-                lat_save = lat[:]
                 if cyclic:
                     if i0 < 0:
                         lon = np.concatenate((lon[:,i0:]-dlon, lon), axis=1)
