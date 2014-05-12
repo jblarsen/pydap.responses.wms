@@ -276,7 +276,9 @@ class WMSResponse(BaseResponse):
         h = float(query.get('HEIGHT', 256))
         time = query.get('TIME')
         figsize = w/dpi, h/dpi
-        bbox = [float(v) for v in query.get('BBOX', '-180,-90,180,90').split(',')]
+        bbox = query.get('BBOX', None)
+        if bbox is not None:
+            bbox = [float(v) for v in bbox.split(',')]
         cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
         srs = query.get('SRS', 'EPSG:4326')
         if srs == 'EPSG:900913': srs = 'EPSG:3785'
@@ -306,7 +308,11 @@ class WMSResponse(BaseResponse):
                     names = [dataset] + hlayers
                     grid = reduce(operator.getitem, names)
                     if is_valid(grid, dataset):
-                        self._plot_grid(dataset, grid, time, bbox, (w, h), ax,
+                        if bbox is None:
+                            lon = get_lon(grid, dataset)
+                            lat = get_lat(grid, dataset)
+                            bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
+                        self._plot_grid(dataset, grid, time, bbox_local, (w, h), ax,
                                         srs, fill_method, cmapname)
                 elif len(vlayers) == 2:
                     # Plot vector field
@@ -316,12 +322,17 @@ class WMSResponse(BaseResponse):
                         grid = reduce(operator.getitem, names)
                         if not is_valid(grid, dataset):
                             raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
+                        if bbox is None:
+                            lon = get_lon(grid, dataset)
+                            lat = get_lat(grid, dataset)
+                            bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
                         grids.append(grid)
-                    self._plot_vector_grids(dataset, grids, time, bbox, (w, h),
+                    self._plot_vector_grids(dataset, grids, time, bbox_local, (w, h),
                                             ax, srs)
 
             # Save to buffer.
-            ax.axis( [bbox[0], bbox[2], bbox[1], bbox[3]] )
+            if bbox is not None:
+                ax.axis( [bbox[0], bbox[2], bbox[1], bbox[3]] )
             ax.axis('off')
             canvas = FigureCanvas(fig)
             output = StringIO() 
