@@ -279,7 +279,7 @@ class WMSResponse(BaseResponse):
         bbox = [float(v) for v in query.get('BBOX', '-180,-90,180,90').split(',')]
         cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
         srs = query.get('SRS', 'EPSG:4326')
-        if srs == 'EPSG:900913': srs = 'EPSG:3857'
+        if srs == 'EPSG:900913': srs = 'EPSG:3785'
         # Override fill_method by user requested style
         styles = query.get('STYLES', fill_method)
         if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
