@@ -55,7 +55,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 <Service>
   <Name>${dataset.name}</Name>
   <Title>WMS server for ${dataset.attributes.get('long_name', dataset.name)}</Title>
-  <OnlineResource xlink:href="$location"></OnlineResource>
+  <OnlineResource xlink:href="${location + '.html'}"></OnlineResource>
 </Service>
 
 <Capability>
@@ -64,7 +64,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
       <Format>application/vnd.ogc.wms_xml</Format>
       <DCPType>
         <HTTP>
-          <Get><OnlineResource xlink:href="$location"></OnlineResource></Get>
+          <Get><OnlineResource xlink:href="${location + '.wms'}"></OnlineResource></Get>
         </HTTP>
       </DCPType>
     </GetCapabilities>
@@ -72,7 +72,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
       <Format>image/png</Format>
       <DCPType>
         <HTTP>
-          <Get><OnlineResource xlink:href="$location"></OnlineResource></Get>
+          <Get><OnlineResource xlink:href="${location + '.wms'}"></OnlineResource></Get>
         </HTTP>
       </DCPType>
     </GetMap>
@@ -140,6 +140,13 @@ class WMSResponse(BaseResponse):
         # dataset. We strip all WMS related arguments since they don't
         # affect the dataset.
         query = parse_dict_querystring(environ)
+
+        # Convert WMS argument keys to lower case
+        for k,v in query.iteritems():
+            if k.lower() in WMS_ARGUMENTS:
+                del query[k]
+                query[k.lower()] = v
+
         try:
             dap_query = ['%s=%s' % (k, query[k]) for k in query
                     if k.lower() not in WMS_ARGUMENTS]
@@ -155,7 +162,7 @@ class WMSResponse(BaseResponse):
             self.cache = None
 
         # Handle GetMap and GetCapabilities requests
-        type_ = query.get('REQUEST', 'GetMap')
+        type_ = query.get('request', 'GetMap')
         if type_ == 'GetCapabilities':
             self.serialize = self._get_capabilities(environ)
             self.headers.append( ('Content-type', 'text/xml') )
@@ -197,7 +204,7 @@ class WMSResponse(BaseResponse):
         query = parse_dict_querystring(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
         figsize = w/dpi, h/dpi
-        cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
+        cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
 
         def serialize(dataset):
             fix_map_attributes(dataset)
@@ -205,12 +212,12 @@ class WMSResponse(BaseResponse):
             fig.set_facecolor('white')
             fig.set_edgecolor('none')
             ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
-            if asbool(query.get('TRANSPARENT', 'true')):
+            if asbool(query.get('transparent', 'true')):
                 fig.figurePatch.set_alpha(0.0)
                 ax.axesPatch.set_alpha(0.5)
 
             # Plot requested grids.
-            layers = [layer for layer in query.get('LAYERS', '').split(',')
+            layers = [layer for layer in query.get('layers', '').split(',')
                     if layer] or [var.id for var in walk(dataset, GridType)]
             layer = layers[0]
             names = [dataset] + layer.split('.')
@@ -272,18 +279,18 @@ class WMSResponse(BaseResponse):
         fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
         assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
                                'pcolorfast']
-        w = float(query.get('WIDTH', 256))
-        h = float(query.get('HEIGHT', 256))
-        time = query.get('TIME')
+        w = float(query.get('width', 256))
+        h = float(query.get('height', 256))
+        time = query.get('time')
         figsize = w/dpi, h/dpi
-        bbox = query.get('BBOX', None)
+        bbox = query.get('bbox', None)
         if bbox is not None:
             bbox = [float(v) for v in bbox.split(',')]
-        cmapname = query.get('CMAP', environ.get('pydap.responses.wms.cmap', 'jet'))
-        srs = query.get('SRS', 'EPSG:4326')
+        cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+        srs = query.get('srs', 'EPSG:4326')
         if srs == 'EPSG:900913': srs = 'EPSG:3785'
         # Override fill_method by user requested style
-        styles = query.get('STYLES', fill_method)
+        styles = query.get('styles', fill_method)
         if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
             fill_method = styles
 
@@ -293,12 +300,12 @@ class WMSResponse(BaseResponse):
             ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
-            if asbool(query.get('TRANSPARENT', 'true')):
+            if asbool(query.get('transparent', 'true')):
                 fig.figurePatch.set_alpha(0.0)
                 ax.axesPatch.set_alpha(0.0)
             
             # Plot requested grids (or all if none requested).
-            layers = [layer for layer in query.get('LAYERS', '').split(',')
+            layers = [layer for layer in query.get('layers', '').split(',')
                     if layer] or [var.id for var in walk(dataset, GridType)]
             for layer in layers:
                 hlayers = layer.split('.')
@@ -733,7 +740,8 @@ class WMSResponse(BaseResponse):
 
             # Remove ``REQUEST=GetCapabilites`` from query string.
             location = construct_url(environ, with_query_string=True)
-            base = location.split('REQUEST=')[0].rstrip('?&')
+            #base = location.split('REQUEST=')[0].rstrip('?&')
+            base = location.split('?')[0].rstrip('.wms')
 
             context = {
                     'dataset': dataset,
