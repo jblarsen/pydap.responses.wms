@@ -48,7 +48,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
  ]>
 
 <WMT_MS_Capabilities version="1.1.1"
-        xmlns="http://www.opengis.net/wms" 
+        xmlns:wms="http://www.opengis.net/wms" 
         xmlns:py="http://genshi.edgewall.org/"
         xmlns:xlink="http://www.w3.org/1999/xlink">
 
@@ -87,6 +87,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
     <SRS>EPSG:4326</SRS>
     <SRS>EPSG:3857</SRS>
     <SRS>EPSG:900913</SRS>
+    <SRS>EPSG:3785</SRS>
     <SRS>EPSG:3395</SRS>
     <LatLonBoundingBox minx="${lon_range[0]}" miny="${lat_range[0]}" maxx="${lon_range[1]}" maxy="${lat_range[1]}"></LatLonBoundingBox>
     <BoundingBox CRS="EPSG:4326" minx="${lon_range[0]}" miny="${lat_range[0]}" maxx="${lon_range[1]}" maxy="${lat_range[1]}"/>
@@ -119,16 +120,6 @@ class WMSResponse(BaseResponse):
 
     renderer = GenshiRenderer(
             options={}, loader=StringLoader( {'capabilities.xml': DEFAULT_TEMPLATE} ))
-    #with open('ifm_colors.json', 'r') as colorfile:
-    with open('/home/prod/pydap-server/ifm_colors.json', 'r') as colorfile:
-        colors = json.load(colorfile)
-        for cname in colors:
-            levs = colors[cname]['levels']
-            cols = colors[cname]['colors']
-            extend = colors[cname]['extend']
-            cmap, norm = from_levels_and_colors(levs, cols, extend)
-            colors[cname] = {'cmap': cmap, 'norm': norm}
-        del levs, cols, extend, cmap, norm, cname
 
     def __init__(self, dataset):
         BaseResponse.__init__(self, dataset)
@@ -140,6 +131,21 @@ class WMSResponse(BaseResponse):
         # dataset. We strip all WMS related arguments since they don't
         # affect the dataset.
         query = parse_dict_querystring(environ)
+
+        # Set class variable colors on first call
+        if not hasattr(WMSResponse, 'colors'):
+            colorfile = environ.get('pydap.responses.wms.colorfile', None)
+            with open(colorfile, 'r') as file:
+                colors = json.load(file)
+                for cname in colors:
+                    levs = colors[cname]['levels']
+                    cols = colors[cname]['colors']
+                    extend = colors[cname]['extend']
+                    cmap, norm = from_levels_and_colors(levs, cols, extend)
+                    colors[cname] = {'cmap': cmap, 'norm': norm}
+                del levs, cols, extend, cmap, norm, cname
+                WMSResponse.colors = colors
+            del colorfile
 
         # Convert WMS argument keys to lower case
         for k,v in query.iteritems():
@@ -319,6 +325,8 @@ class WMSResponse(BaseResponse):
                             lon = get_lon(grid, dataset)
                             lat = get_lat(grid, dataset)
                             bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
+                        else:
+                            bbox_local = bbox[:]
                         self._plot_grid(dataset, grid, time, bbox_local, (w, h), ax,
                                         srs, fill_method, cmapname)
                 elif len(vlayers) == 2:
@@ -333,6 +341,8 @@ class WMSResponse(BaseResponse):
                             lon = get_lon(grid, dataset)
                             lat = get_lat(grid, dataset)
                             bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
+                        else:
+                            bbox_local = bbox[:]
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, bbox_local, (w, h),
                                             ax, srs)
