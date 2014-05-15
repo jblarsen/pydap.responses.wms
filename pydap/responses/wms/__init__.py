@@ -106,7 +106,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
       <LatLonBoundingBox minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"></LatLonBoundingBox>
       <BoundingBox CRS="EPSG:4326" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
       <Dimension py:if="time is not None" name="time" units="ISO8601"/>
-      <Extent py:if="time is not None" name="time" default="${time[0].isoformat()}/${time[-1].isoformat()}" nearestValue="0">${time[0].isoformat()}/${time[-1].isoformat()}</Extent>
+      <Extent py:if="time is not None" name="time" default="${time[0].isoformat()}" nearestValue="0">${','.join([t.isoformat() for t in time])}</Extent>
     </Layer>
   </Layer>
 </Capability>
