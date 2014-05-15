@@ -394,6 +394,9 @@ class WMSResponse(BaseResponse):
 
         # Project data
         lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
+        base_srs = 'EPSG:4326'
+        p_base = pyproj.Proj(init=base_srs)
+        p_query = pyproj.Proj(init=srs)
 
         # Now we plot the data window until the end of the bbox:
         w, h = size
