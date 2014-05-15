@@ -1016,7 +1016,9 @@ def time_slice(time, grid, dataset):
         l = None
     # TODO: Calculate index directly instead of array first
     # We do not need to be able to extract multiple time steps
-    return np.where(l == True)[0][0]
+    if l is not None:
+        l = np.where(l == True)[0][0]
+    return l
 
 def project_data(srs, bbox, lon, lat, cyclic):
     """Project data and determine increment for going around globe."""
