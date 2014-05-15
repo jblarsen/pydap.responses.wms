@@ -382,22 +382,7 @@ class WMSResponse(BaseResponse):
 
     def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs):
         # Slice according to time request (WMS-T).
-        if time is not None:
-            values = np.array(get_time(grids[0], dataset))
-            l = np.zeros(len(values), bool)  # get no data by default
-
-            tokens = time.split(',')
-            for token in tokens:
-                if '/' in token: # range
-                    start, end = token.strip().split('/')
-                    start = iso8601.parse_date(start, default_timezone=None)
-                    end = iso8601.parse_date(end, default_timezone=None)
-                    l[(values >= start) & (values <= end)] = True
-                else:
-                    instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                    l[values == instant] = True
-        else:
-            l = None
+        l = time_slice(time, grids[0], dataset)
 
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
@@ -408,22 +393,8 @@ class WMSResponse(BaseResponse):
         lat = np.asarray(get_lat(grids[0], dataset)[:])
 
         # Project data
-        base_srs = 'EPSG:4326'
-        do_proj = srs != base_srs
-        if do_proj:
-            p_base = pyproj.Proj(init=base_srs)
-            p_query = pyproj.Proj(init=srs)
-            if len(lon.shape) == 1:
-                lon, lat = np.meshgrid(lon, lat)
-            dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
-            lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            if bbox[0] > bbox[2] or cyclic:
-                lon = np.where(lon >= 0.0, lon, lon+dlon)
-        else:
-            dlon = 360.0
+        lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
 
-        while np.min(lon) > bbox[0]:
-            lon -= dlon
         # Now we plot the data window until the end of the bbox:
         w, h = size
         while np.min(lon) < bbox[2]:
@@ -529,24 +500,7 @@ class WMSResponse(BaseResponse):
 
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method, cmapname='jet'):
         # Slice according to time request (WMS-T).
-        if time is not None:
-            values = np.array(get_time(grid, dataset))
-            if len(values.shape) == 0:
-                l = None
-            else:
-                l = np.zeros(values.shape, bool)  # get no data by default
-                tokens = time.split(',')
-                for token in tokens:
-                    if '/' in token: # range
-                        start, end = token.strip().split('/')
-                        start = iso8601.parse_date(start, default_timezone=None)
-                        end = iso8601.parse_date(end, default_timezone=None)
-                        l[(values >= start) & (values <= end)] = True
-                    else:
-                        instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                        l[values == instant] = True
-        else:
-            l = None
+        l = time_slice(time, grid, dataset)
 
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
@@ -570,24 +524,7 @@ class WMSResponse(BaseResponse):
             lat = np.concatenate((lat_bounds[:,0], lat_bounds[-1:,1]), 0)
 
         # Project data
-        base_srs = 'EPSG:4326'
-        do_proj = srs != base_srs
-        if do_proj:
-            p_base = pyproj.Proj(init=base_srs)
-            p_query = pyproj.Proj(init=srs)
-            if len(lon.shape) == 1:
-                lon, lat = np.meshgrid(lon, lat)
-            dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
-            lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-            if bbox[0] > bbox[2] or cyclic:
-                lon = np.where(lon >= 0.0, lon, lon+dlon)
-        else:
-            dlon = 360.0
-
-        # Determine how much to increment for one full go around the globe
-
-        while np.min(lon) > bbox[0]:
-            lon -= dlon
+        lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
 
         # Now we plot the data window until the end of the bbox:
         w, h = size
@@ -606,9 +543,9 @@ class WMSResponse(BaseResponse):
                 lons = lon[i0:i1:istep]
                 lats = lat[j0:j1:jstep]
                 if fill_method in ['contour', 'contourf']:
-                    data = np.asarray(grid.array[...,j0:j1:jstep,i0:i1:istep])
+                    data = grid.array[...,j0:j1:jstep,i0:i1:istep]
                 else:
-                    data = np.asarray(grid.array[...,j0:j1-1:jstep,i0:i1-1:istep])
+                    data = grid.array[...,j0:j1-1:jstep,i0:i1-1:istep]
 
                 # Fix cyclic data.
                 if cyclic and fill_method in ['contour', 'contourf']:
@@ -671,7 +608,7 @@ class WMSResponse(BaseResponse):
             if data.shape: 
                 # apply time slices
                 if l is not None:
-                    data = np.asarray(data)[l]
+                    data = np.asarray(data[l])
                 else:
                     # FIXME: Do the indexing here if we decide to go for just the first timestep
                     data = np.asarray(data[0])
@@ -1057,3 +994,45 @@ def parse_dict_querystring_lower(environ):
         query[k.lower()] = v
     return query
 
+def time_slice(time, grid, dataset):
+    """Slice according to time request (WMS-T)."""
+    if time is not None:
+        values = np.array(get_time(grid, dataset))
+        if len(values.shape) == 0:
+            l = None
+        else:
+            l = np.zeros(values.shape, bool)  # get no data by default
+            tokens = time.split(',')
+            for token in tokens:
+                if '/' in token: # range
+                    start, end = token.strip().split('/')
+                    start = iso8601.parse_date(start, default_timezone=None)
+                    end = iso8601.parse_date(end, default_timezone=None)
+                    l[(values >= start) & (values <= end)] = True
+                else:
+                    instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
+                    l[values == instant] = True
+    else:
+        l = None
+    # TODO: Calculate index directly instead of array first
+    # We do not need to be able to extract multiple time steps
+    return np.where(l == True)[0][0]
+
+def project_data(srs, bbox, lon, lat, cyclic):
+    """Project data and determine increment for going around globe."""
+    base_srs = 'EPSG:4326'
+    do_proj = srs != base_srs
+    if do_proj:
+        p_base = pyproj.Proj(init=base_srs)
+        p_query = pyproj.Proj(init=srs)
+        if len(lon.shape) == 1:
+            lon, lat = np.meshgrid(lon, lat)
+        dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
+        lon, lat = pyproj.transform(p_base, p_query, lon, lat)
+        if bbox[0] > bbox[2] or cyclic:
+            lon = np.where(lon >= 0.0, lon, lon+dlon)
+    else:
+        dlon = 360.0
+    while np.min(lon) > bbox[0]:
+        lon -= dlon
+    return lon, lat, dlon, do_proj
