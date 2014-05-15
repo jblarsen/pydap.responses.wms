@@ -37,9 +37,8 @@ from pydap.util.template import GenshiRenderer, StringLoader, TemplateNotFound
 from pydap.util.safeeval import expr_eval
 from pydap.lib import walk, encode_atom
 
-
-WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time']
-
+WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
+                 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 <!DOCTYPE WMT_MS_Capabilities SYSTEM "http://schemas.opengis.net/wms/1.1.1/WMS_MS_Capabilities.dtd"
@@ -113,7 +112,6 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 </Capability>
 </WMT_MS_Capabilities>"""
 
-
 class WMSResponse(BaseResponse):
 
     __description__ = "Web Map Service image"
@@ -130,28 +128,26 @@ class WMSResponse(BaseResponse):
         # most (all?) pre-computed values will depend on the specific
         # dataset. We strip all WMS related arguments since they don't
         # affect the dataset.
-        query = parse_dict_querystring(environ)
+        query = parse_dict_querystring_lower(environ)
 
-        # Set class variable colors on first call
+        # Set class variable "colors" on first call
         if not hasattr(WMSResponse, 'colors'):
             colorfile = environ.get('pydap.responses.wms.colorfile', None)
-            with open(colorfile, 'r') as file:
-                colors = json.load(file)
-                for cname in colors:
-                    levs = colors[cname]['levels']
-                    cols = colors[cname]['colors']
-                    extend = colors[cname]['extend']
-                    cmap, norm = from_levels_and_colors(levs, cols, extend)
-                    colors[cname] = {'cmap': cmap, 'norm': norm}
-                del levs, cols, extend, cmap, norm, cname
-                WMSResponse.colors = colors
-            del colorfile
+            if colorfile is None:
+                WMSResponse.colors = {}
+            else:
+                with open(colorfile, 'r') as file:
+                    colors = json.load(file)
+                    for cname in colors:
+                        levs = colors[cname]['levels']
+                        cols = colors[cname]['colors']
+                        extend = colors[cname]['extend']
+                        cmap, norm = from_levels_and_colors(levs, cols, extend)
+                        colors[cname] = {'cmap': cmap, 'norm': norm}
+                    del levs, cols, extend, cmap, norm, cname
+                    WMSResponse.colors = colors
+                del colorfile
 
-        # Convert WMS argument keys to lower case
-        for k,v in query.iteritems():
-            if k.lower() in WMS_ARGUMENTS:
-                del query[k]
-                query[k.lower()] = v
 
         try:
             dap_query = ['%s=%s' % (k, query[k]) for k in query
@@ -207,7 +203,7 @@ class WMSResponse(BaseResponse):
 
     def _get_colorbar(self, environ):
         w, h = 100, 300
-        query = parse_dict_querystring(environ)
+        query = parse_dict_querystring_lower(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
         figsize = w/dpi, h/dpi
         cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
@@ -280,7 +276,7 @@ class WMSResponse(BaseResponse):
 
     def _get_map(self, environ):
         # Calculate appropriate figure size.
-        query = parse_dict_querystring(environ)
+        query = parse_dict_querystring_lower(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
         fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
         assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
@@ -677,7 +673,9 @@ class WMSResponse(BaseResponse):
                 if l is not None:
                     data = np.asarray(data)[l]
                 else:
-                    data = np.asarray(data)
+                    # FIXME: Do the indexing here if we decide to go for just the first timestep
+                    data = np.asarray(data[0])
+                    #data = np.asarray(data)
 
                 # reduce dimensions and mask missing_values
                 data = fix_data(data, grid.attributes)
@@ -700,10 +698,10 @@ class WMSResponse(BaseResponse):
                     if fill_method == 'contourf':
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=levels, antialiased=False)
-                        newlevels = _contour_levels(levels, cmap.colorbar_extend)
-                        cs = ax.contour(X, Y, data, colors='w', levels=newlevels, 
-                                    antialiased=False)
-                        ax.clabel(cs, inline=1, fontsize=10)
+                        #newlevels = _contour_levels(levels, cmap.colorbar_extend)
+                        #cs = ax.contour(X, Y, data, colors='w', levels=newlevels, 
+                        #            antialiased=False)
+                        #ax.clabel(cs, inline=1, fontsize=10)
                     elif fill_method == 'contour':
                         newlevels = _contour_levels(levels, cmap.colorbar_extend)
                         cs = plot_method(X, Y, data, colors='black', levels=newlevels, 
@@ -1045,4 +1043,17 @@ def _contour_levels(levels, extend):
     if extend in ['max', 'neither']:
         outlevels = outlevels[1:]
     return outlevels
+
+def parse_dict_querystring_lower(environ):
+    """Parses query string into dict with keys in lower case."""
+    query = parse_dict_querystring(environ)
+    # Convert WMS argument keys to lower case
+    lowerlist = []
+    for k,v in query.iteritems():
+        if k.lower() in WMS_ARGUMENTS:
+            lowerlist.append(k)
+    for k in lowerlist:
+        v = query.pop(k)
+        query[k.lower()] = v
+    return query
 
