@@ -1,0 +1,209 @@
+#!/usr/bin/env python
+# encoding: utf8
+"""
+This module tests the performance of the WMS server and produces a profile for
+further analysis.
+"""
+import urllib
+import urlparse
+import StringIO
+import time
+import timeit
+import traceback
+from pydap.handlers.netcdf import Handler
+import pyproj
+import wms_utils
+
+# Override openURL in the WebMapService class to call our handler instead.
+# When this is done we can use the WebMapService class on our test handler.
+class openURL_mock:
+    def __init__(self, path_info, handler):
+        self.handler = handler
+        self.base_env = {'SCRIPT_NAME': '',
+                         'REQUEST_METHOD': 'GET', 
+                         'PATH_INFO': path_info,
+                         'pydap.responses.wms.fill_method': 'contourf',
+                         'pydap.responses.wms.paletted': True,
+                         'wsgi.url_scheme': 'http',
+                         'SERVER_NAME': 'dummy_server',
+                         'SERVER_PORT': '90000',
+                         'SERVER_PROTOCOL': 'HTTP/1.1'}
+
+    def __call__(self, url_base, data, method='Get', cookies=None, 
+                 username=None, password=None, timeout=30):
+        """\
+        Function to open urls - used to override the openURL method in OWSlib 
+        with a version which calls our handler instead.
+        """
+        env = self.base_env.copy()
+        env['QUERY_STRING'] = data
+        result = self.handler(env, start_response_mock)
+        u = StringIO.StringIO(result[0])
+        return u
+
+def start_response_mock(status, response_headers, exc_info=None):
+    if status != '200 OK':
+        print status
+        print response_headers
+        raise
+
+class WMSResponse(object):
+    def __init__(self, datapath):
+        self.datapath = datapath
+        self.handler = Handler(datapath)
+        self.url = 'http://fakeurl.wms'
+        self.path_info = '/' + datapath + '.wms'
+
+        # Monkey patching openURL with our own version of it
+        self.base_env = {'SCRIPT_NAME': '',
+                         'REQUEST_METHOD': 'GET', 
+                         'PATH_INFO': self.path_info,
+                         'pydap.responses.wms.fill_method': 'contourf',
+                         'pydap.responses.wms.paletted': True,
+                         'wsgi.url_scheme': 'http',
+                         'SERVER_NAME': 'dummy_server',
+                         'SERVER_PORT': '90000',
+                         'SERVER_PROTOCOL': 'HTTP/1.1'}
+        self.base_query = {'SERVICE': 'WMS',
+                           'REQUEST': 'GetMap',
+                           'VERSION': '1.1.1',
+                           'STYLES': '',
+                           'FORMAT': 'image/png',
+                           'TRANSPARENT': 'true',
+                           'HEIGHT': 512,
+                           'WIDTH': 512,
+                           'BBOX': '-180.0,-90.0,180.0,90.0',
+                           'SRS': 'EPSG:4326'}
+
+    def get_layers(self):
+        """Return layers in WMS."""
+        # Mock OWSLib
+        openURL = wms_utils.owslib.wms.openURL
+        wms_utils.owslib.wms.openURL = openURL_mock(self.path_info, self.handler)
+        # Get layers
+        layers = wms_utils.get_layers(self.url)
+        # Restore mocked object
+        wms_utils.owslib.wms.openURL = openURL
+        return layers
+
+    def get_srs(self, layer):
+        """Return supported SRS' for this WMS."""
+        # Mock OWSLib
+        openURL = wms_utils.owslib.wms.openURL
+        wms_utils.owslib.wms.openURL = openURL_mock(self.path_info, self.handler)
+        # Get layers
+        crs_list = wms_utils.get_crs(self.url, layer)
+        # Restore mocked object
+        wms_utils.owslib.wms.openURL = openURL
+        return crs_list
+
+    def request(self, layer, srs, checkimg=False, saveimg=False):
+        """Requests WMS image from server and returns image"""
+        # Mock OWSLib
+        openURL = wms_utils.owslib.wms.openURL
+        wms_utils.owslib.wms.openURL = openURL_mock(self.path_info, self.handler)
+        env = self.base_env.copy()
+        query = wms_utils.get_params_and_bounding_box(self.url, layer, srs)
+        t = wms_utils.get_time(self.url, layer)
+        if t is not None:
+            query['TIME'] = t[len(t)/2]
+        qs = urllib.urlencode(query)
+        env['QUERY_STRING'] = qs
+        result = self.handler(env, start_response_mock)
+        wms_utils.owslib.wms.openURL = openURL
+        if checkimg:
+            is_blank = wms_utils.check_blank(result)
+            if is_blank:
+                raise SystemExit("A blank image was returned!")
+            else:
+                print('Image data OK')
+        if saveimg:
+            open('tmp/png_%s_%s.png' % (layer, srs), 'wb').write(result[0])
+        return result
+
+    def request_images(self, url, layer, check_blank=False):
+        """
+        Check if the WMS layer at the WMS server specified in the
+        URL returns a blank image when at the full extent
+        """
+        # get list of acceptable CRS' for the layer
+        wms = WebMapService(url, version='1.1.1')
+        crs_list = wms[layer].crsOptions
+        print('Requesting these crs\' %s' % crs_list)
+        for crs in crs_list:
+            params = get_params_and_bounding_box(url, layer, crs)
+            env = self.base_env.copy()
+            env['QUERY_STRING'] = params
+            resp = handler(env, start_response_mock)
+            if check_blank:
+                # a PNG image was returned
+                is_blank = check_blank(resp)
+                if is_blank:
+                    raise SystemExit("A blank image was returned!")
+                else:
+                    print('Image data OK')
+
+class TestWMSResponse(object):
+    def setUp(self):
+        #self.handler = Handler('data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc')
+        datapaths= ['data/NOAA/GFS/NOAA_GFS_VISIBILITY.nc',
+                    'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc',
+                    'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_MEDSEA.nc',
+                    'data/FCOO/GETM/metoc.dk.2Dvars.1nm.2D.1h.NS1C-v001C.nc',
+                    'data/FCOO/GETM/metoc.dk.velocities.1nm.surface.1h.NS1C-v001C.nc',
+                    'data/FCOO/GETM/metoc.full_dom.2Dvars.3nm.2D.1h.NS1C-v001C.nc',
+                    'data/FCOO/GETM/metoc.full_dom.velocities.surface.3nm.1h.NS1C-v001C.nc',
+                    'data/FCOO/GETM/metoc.idk.2Dvars.600m.2D.1h.DK600-v001C.nc',
+                    'data/FCOO/GETM/metoc.idk.velocities.600m.surface.1h.DK600-v001C.nc',
+                    'data/FCOO/WW3/ww3fcast_sigwave_grd_DKinner_v001C.nc',
+                    'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc',
+                    'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
+                    'data/DMI/HIRLAM/metoc.DMI_HIRLAM-S03_NSBALTIC_3NM_v004C.nc']
+        self.responses = [WMSResponse(datapath) for datapath in datapaths]
+
+def make_requests(n=1, wmslist=None, layerlist=None, srslist=None, dotiming=True, 
+                  checkimg=False, saveimg=False):
+    """Make requests for all WMS data and all layers."""
+    wms_response = TestWMSResponse()
+    wms_response.setUp()
+    #wms = [wr for wr in wms_response.responses if wr.datapath == 'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc'][0]
+    #wms.request(layer='u', srs='EPSG:4326')
+    t_sum = 0.0
+    n_sum = 0
+    if wmslist is None:
+        wmslist = wms_response.responses
+    else:
+        wmslist = [wr for wr in wms_response.responses if wr.datapath in wmslist]
+    for wms in wmslist:
+        print('Processing %s' % wms.datapath)
+        if layerlist is None:
+            layer_list = wms.get_layers()
+        else:
+            layer_list = layerlist[:]
+        for layer in layer_list:
+            if srslist is None:
+                srs_list = wms.get_srs(layer=layer)
+            else:
+                srs_list = srslist[:]
+            for srs in srs_list:
+                if dotiming:
+                    t1 = time.clock()
+                for i in range(n):
+                    result = wms.request(layer=layer, srs=srs, 
+                             checkimg=checkimg, saveimg=saveimg)
+                if dotiming:
+                    t2 = time.clock()
+                    t = (t2-t1)/float(n)*1000
+                    print('Time for layer=%s, srs=%s per plot: %i milliseconds' \
+                          % (layer, srs, t))
+                    t_sum += t
+                    n_sum += 1
+    if dotiming:
+        t_ave = t_sum/float(n_sum)
+        print('Average time for plotting one layer: %i milliseconds' % t_ave)
+
+if __name__ == '__main__':
+    import cProfile
+    cProfile.run('make_requests(n=3)', 'wms.prof')
+    make_requests()
+    make_requests(checkimg=True, saveimg=True)
