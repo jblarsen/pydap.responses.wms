@@ -6,6 +6,7 @@ import operator
 import bisect
 import json
 import time
+import copy
 from rfc822 import parsedate
 
 from paste.request import construct_url, parse_dict_querystring
@@ -118,6 +119,8 @@ class WMSResponse(BaseResponse):
 
     renderer = GenshiRenderer(
             options={}, loader=StringLoader( {'capabilities.xml': DEFAULT_TEMPLATE} ))
+
+    figcache = {}
 
     def __init__(self, dataset):
         BaseResponse.__init__(self, dataset)
@@ -275,31 +278,43 @@ class WMSResponse(BaseResponse):
         return actual_range
 
     def _get_map(self, environ):
-        # Calculate appropriate figure size.
-        query = parse_dict_querystring_lower(environ)
-        dpi = float(environ.get('pydap.responses.wms.dpi', 80))
-        fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
-        assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
-                               'pcolorfast']
-        w = float(query.get('width', 256))
-        h = float(query.get('height', 256))
-        time = query.get('time')
-        figsize = w/dpi, h/dpi
-        bbox = query.get('bbox', None)
-        if bbox is not None:
-            bbox = [float(v) for v in bbox.split(',')]
-        cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
-        srs = query.get('srs', 'EPSG:4326')
-        if srs == 'EPSG:900913': srs = 'EPSG:3785'
-        # Override fill_method by user requested style
-        styles = query.get('styles', fill_method)
-        if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
-            fill_method = styles
+        def prep_map(environ):
+            # Calculate appropriate figure size.
+            query = parse_dict_querystring_lower(environ)
+            dpi = float(environ.get('pydap.responses.wms.dpi', 80))
+            fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
+            assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
+                                   'pcolorfast']
+            w = float(query.get('width', 256))
+            h = float(query.get('height', 256))
+            time = query.get('time')
+            figsize = w/dpi, h/dpi
+            bbox = query.get('bbox', None)
+            if bbox is not None:
+                bbox = [float(v) for v in bbox.split(',')]
+            cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+            srs = query.get('srs', 'EPSG:4326')
+            if srs == 'EPSG:900913': srs = 'EPSG:3785'
+            # Override fill_method by user requested style
+            styles = query.get('styles', fill_method)
+            if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
+                fill_method = styles
+            return query, dpi, fill_method, time, figsize, bbox, cmapname, srs, styles, w, h
+        query, dpi, fill_method, time, figsize, bbox, cmapname, srs, styles, w, h = \
+            prep_map(environ)
 
+        #@profile
         def serialize(dataset):
             fix_map_attributes(dataset)
+            # It is apparently expensive to add an axes in matplotlib - so we cache the
+            # axes (a copy of it to keep stuff threadsafe)
             fig = Figure(figsize=figsize, dpi=dpi)
-            ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+            axkey = figsize
+            if axkey in self.figcache:
+                ax = copy.copy(self.figcache[axkey])
+            else:
+                ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+                self.figcache[axkey] = copy.copy(ax)
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
             if asbool(query.get('transparent', 'true')):
@@ -351,7 +366,7 @@ class WMSResponse(BaseResponse):
             output = StringIO() 
             # Optionally convert to paletted png
             paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
-            if paletted:
+            def convert_paletted(canvas, output):
                 # Read image
                 buf, size = canvas.print_to_buffer()
                 im = Image.frombuffer('RGBA', size, buf, 'raw', 'RGBA', 0, 1)
@@ -374,6 +389,9 @@ class WMSResponse(BaseResponse):
                     im.save(output, 'png', optimize=False, transparency=ncolors)
                 else:
                     canvas.print_png(output)
+                return output
+            if paletted:
+                output = convert_paletted(canvas, output)
             else:
                 canvas.print_png(output)
             if hasattr(dataset, 'close'): dataset.close()
@@ -614,14 +632,16 @@ class WMSResponse(BaseResponse):
                     data = np.asarray(data[l])
                 else:
                     # FIXME: Do the indexing here if we decide to go for just the first timestep
-                    data = np.asarray(data[0])
-                    #data = np.asarray(data)
+                    if len(data.shape) > 2:
+                        data = np.asarray(data[0])
+                    else:
+                        data = np.asarray(data)
 
                 # reduce dimensions and mask missing_values
                 data = fix_data(data, grid.attributes)
 
                 # plot
-                if data.any():
+                if data.shape and data.any():
                     plot_method = getattr(ax, fill_method)
                     if cmapname in self.colors:
                         norm = self.colors[cmapname]['norm']
