@@ -1,12 +1,13 @@
 from __future__ import division
 
-from StringIO import StringIO
+from cStringIO import StringIO
 import re
 import operator
 import bisect
 import json
 import time
 import copy
+import cPickle
 from rfc822 import parsedate
 
 from paste.request import construct_url, parse_dict_querystring
@@ -113,14 +114,18 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 </Capability>
 </WMT_MS_Capabilities>"""
 
+from beaker.middleware import CacheMiddleware
+def make_cache(app, global_conf, **local_conf):
+    conf = global_conf.copy()
+    conf.update(local_conf)
+    return CacheMiddleware(app, conf)
+
 class WMSResponse(BaseResponse):
 
     __description__ = "Web Map Service image"
 
     renderer = GenshiRenderer(
             options={}, loader=StringLoader( {'capabilities.xml': DEFAULT_TEMPLATE} ))
-
-    figcache = {}
 
     def __init__(self, dataset):
         BaseResponse.__init__(self, dataset)
@@ -163,6 +168,7 @@ class WMSResponse(BaseResponse):
                     querystring=dap_query)
             self.cache = environ['beaker.cache'].get_cache(
                     'pydap.responses.wms+' + location)
+            #self.cache = environ['beaker.cache'].get_cache('pydap.responses.wms')
         except KeyError:
             self.cache = None
 
@@ -303,18 +309,18 @@ class WMSResponse(BaseResponse):
         query, dpi, fill_method, time, figsize, bbox, cmapname, srs, styles, w, h = \
             prep_map(environ)
 
-        #@profile
         def serialize(dataset):
             fix_map_attributes(dataset)
             # It is apparently expensive to add an axes in matplotlib - so we cache the
-            # axes (a copy of it to keep stuff threadsafe)
-            fig = Figure(figsize=figsize, dpi=dpi)
-            axkey = figsize
-            if axkey in self.figcache:
-                ax = copy.copy(self.figcache[axkey])
-            else:
+            # axes (it is pickled so it is a threadsafe copy)
+            try:
+                fig = cPickle.loads(self.cache.get_value((figsize, 'figure')))
+                ax = fig.get_axes()[0]
+            except:
+                fig = Figure(figsize=figsize, dpi=dpi)
                 ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
-                self.figcache[axkey] = copy.copy(ax)
+                if self.cache:
+                    self.cache.set_value((figsize, 'figure'), cPickle.dumps(fig))
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
             if asbool(query.get('transparent', 'true')):
@@ -519,6 +525,7 @@ class WMSResponse(BaseResponse):
             lon += dlon
 
 
+    #@profile
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method, cmapname='jet'):
         # Slice according to time request (WMS-T).
         l = time_slice(time, grid, dataset)
@@ -545,7 +552,21 @@ class WMSResponse(BaseResponse):
             lat = np.concatenate((lat_bounds[:,0], lat_bounds[-1:,1]), 0)
 
         # Project data
-        lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
+        # This operation is expensive - cache results using beaker
+        try:
+            lon_str, lat_str, dlon, do_proj = self.cache.get_value(
+                  (grid.id, 'project_data'))
+            lon = np.load(StringIO(lon_str))
+            lat = np.load(StringIO(lat_str))
+        except:
+            lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
+            if self.cache:
+                lon_str = StringIO()
+                np.save(lon_str, lon)
+                lat_str = StringIO()
+                np.save(lat_str, lat)
+                self.cache.set_value((grid.id, 'project_data'), 
+                                     (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
 
         # Now we plot the data window until the end of the bbox:
         w, h = size
@@ -1043,6 +1064,7 @@ def time_slice(time, grid, dataset):
         l = np.where(l == True)[0][0]
     return l
 
+#@cache.cache('project_data')
 def project_data(srs, bbox, lon, lat, cyclic):
     """Project data and determine increment for going around globe."""
     base_srs = 'EPSG:4326'
