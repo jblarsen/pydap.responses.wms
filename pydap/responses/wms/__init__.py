@@ -468,8 +468,17 @@ class WMSResponse(BaseResponse):
                 xcond = (lon >= bbox[0]) & (lon <= bbox[2])
                 ycond = (lat >= bbox[1]) & (lat <= bbox[3])
                 if (not xcond.any() or not ycond.any()):
-                    lon += dlon
-                    continue
+                    # When bbox "falls between" grid cells xcond and ycond are
+                    # all false. So we have an additional check for that
+                    if not xcond.any():
+                        xcond2 = ((lon[:,:-1] <= bbox[0]) & (lon[:,1:] >= bbox[2]))
+                        xcond[:,:-1] = xcond2
+                    if not ycond.any():
+                        ycond2 = ((lat[:-1,:] <= bbox[1]) & (lon[1:,:] >= bbox[3]))
+                        ycond[:-1,:] = ycond2
+                    if (not xcond.any() or not ycond.any()):
+                        lon += dlon
+                        continue
 
                 istep = max(1, int(np.floor( (nthin * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
                 jstep = max(1, int(np.floor( (nthin * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
@@ -604,8 +613,17 @@ class WMSResponse(BaseResponse):
                 xcond = (lon >= bbox[0]) & (lon <= bbox[2])
                 ycond = (lat >= bbox[1]) & (lat <= bbox[3])
                 if (not xcond.any() or not ycond.any()):
-                    lon += dlon
-                    continue
+                    # When bbox "falls between" grid cells xcond and ycond are
+                    # all false. So we have an additional check for that
+                    if not xcond.any():
+                        xcond2 = ((lon[:,:-1] < bbox[0]) & (lon[:,1:] > bbox[2]))
+                        xcond[:,:-1] = xcond2
+                    if not ycond.any():
+                        ycond2 = ((lat[:-1,:] < bbox[1]) & (lon[1:,:] > bbox[3]))
+                        ycond[:-1,:] = ycond2
+                    if (not xcond.any() or not ycond.any()):
+                        lon += dlon
+                        continue
                 i0 = np.min(I[xcond])-2
                 i1 = np.max(I[xcond])+3
                 lower = False
