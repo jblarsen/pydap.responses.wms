@@ -7,12 +7,19 @@ further analysis.
 import urllib
 import urlparse
 import StringIO
+import cProfile
 import time
 import timeit
 import traceback
 from pydap.handlers.netcdf import Handler
 import pyproj
 import wms_utils
+
+from beaker.cache import CacheManager
+from beaker.util import parse_cache_config_options
+
+cache_opts = { 'cache.type': 'memory' }
+cache = CacheManager(**parse_cache_config_options(cache_opts))
 
 # Override openURL in the WebMapService class to call our handler instead.
 # When this is done we can use the WebMapService class on our test handler.
@@ -22,6 +29,7 @@ class openURL_mock:
         self.base_env = {'SCRIPT_NAME': '',
                          'REQUEST_METHOD': 'GET', 
                          'PATH_INFO': path_info,
+                         'beaker.cache': cache,
                          'pydap.responses.wms.fill_method': 'contourf',
                          'pydap.responses.wms.paletted': True,
                          'wsgi.url_scheme': 'http',
@@ -58,6 +66,7 @@ class WMSResponse(object):
         self.base_env = {'SCRIPT_NAME': '',
                          'REQUEST_METHOD': 'GET', 
                          'PATH_INFO': self.path_info,
+                         'beaker.cache': cache,
                          'pydap.responses.wms.fill_method': 'contourf',
                          'pydap.responses.wms.paletted': True,
                          'wsgi.url_scheme': 'http',
@@ -97,7 +106,7 @@ class WMSResponse(object):
         wms_utils.owslib.wms.openURL = openURL
         return crs_list
 
-    def request(self, layer, srs, checkimg=False, saveimg=False):
+    def request(self, layer, srs, checkimg=False, saveimg=False, profiler=None):
         """Requests WMS image from server and returns image"""
         # Mock OWSLib
         openURL = wms_utils.owslib.wms.openURL
@@ -109,10 +118,14 @@ class WMSResponse(object):
             query['TIME'] = t[len(t)/2]
         qs = urllib.urlencode(query)
         env['QUERY_STRING'] = qs
+        if profiler is not None:
+            profiler.enable()
         result = self.handler(env, start_response_mock)
+        if profiler is not None:
+            profiler.disable()
         wms_utils.owslib.wms.openURL = openURL
         if checkimg:
-            is_blank = wms_utils.check_blank(result)
+            is_blank = wms_utils.check_blank(result[0])
             if is_blank:
                 raise SystemExit("A blank image was returned!")
             else:
@@ -160,12 +173,17 @@ class TestWMSResponse(object):
                     'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
                     'data/DMI/HIRLAM/metoc.DMI_HIRLAM-S03_NSBALTIC_3NM_v004C.nc']
         self.responses = [WMSResponse(datapath) for datapath in datapaths]
+        #self.responses = self.responses[:4]
 
-def make_requests(n=1, wmslist=None, layerlist=None, srslist=None, dotiming=True, 
-                  checkimg=False, saveimg=False):
+def make_requests(n=1, wmslist=None, layerlist=None, srslist=None, dotiming=False, 
+                  doprofiling=False, checkimg=False, saveimg=False):
     """Make requests for all WMS data and all layers."""
     wms_response = TestWMSResponse()
     wms_response.setUp()
+    if doprofiling:
+        pr = cProfile.Profile()
+    else:
+        pr = None
     #wms = [wr for wr in wms_response.responses if wr.datapath == 'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc'][0]
     #wms.request(layer='u', srs='EPSG:4326')
     t_sum = 0.0
@@ -190,20 +208,25 @@ def make_requests(n=1, wmslist=None, layerlist=None, srslist=None, dotiming=True
                     t1 = time.clock()
                 for i in range(n):
                     result = wms.request(layer=layer, srs=srs, 
-                             checkimg=checkimg, saveimg=saveimg)
+                             checkimg=checkimg, saveimg=saveimg,
+                             profiler=pr)
                 if dotiming:
                     t2 = time.clock()
                     t = (t2-t1)/float(n)*1000
-                    print('Time for layer=%s, srs=%s per plot: %i milliseconds' \
+                    print('    Time for layer=%s, srs=%s per plot: %i milliseconds' \
                           % (layer, srs, t))
                     t_sum += t
                     n_sum += 1
+    if doprofiling:
+        pr.dump_stats('wms.prof')
+
     if dotiming:
         t_ave = t_sum/float(n_sum)
         print('Average time for plotting one layer: %i milliseconds' % t_ave)
 
 if __name__ == '__main__':
     import cProfile
-    cProfile.run('make_requests(n=3)', 'wms.prof')
-    make_requests()
-    make_requests(checkimg=True, saveimg=True)
+    make_requests(n=3, dotiming=True)
+    #make_requests(n=3, doprofiling=True)
+    #make_requests(n=1, doprofiling=False)
+    #make_requests(n=1, checkimg=True, saveimg=True)
