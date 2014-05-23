@@ -124,14 +124,14 @@ class WMSResponse(object):
         if profiler is not None:
             profiler.disable()
         wms_utils.owslib.wms.openURL = openURL
+        if saveimg:
+            open('tmp/png_%s_%s.png' % (layer, srs), 'wb').write(result[0])
         if checkimg:
             is_blank = wms_utils.check_blank(result[0])
             if is_blank:
                 raise SystemExit("A blank image was returned!")
             else:
                 print('Image data OK')
-        if saveimg:
-            open('tmp/png_%s_%s.png' % (layer, srs), 'wb').write(result[0])
         return result
 
     def request_images(self, url, layer, check_blank=False):
@@ -226,7 +226,7 @@ def make_requests(n=1, wmslist=None, layerlist=None, srslist=None, dotiming=Fals
 
 if __name__ == '__main__':
     import cProfile
-    make_requests(n=3, dotiming=True)
+    #make_requests(n=3, dotiming=True)
     #make_requests(n=3, doprofiling=True)
     #make_requests(n=1, doprofiling=False)
-    #make_requests(n=1, checkimg=True, saveimg=True)
+    make_requests(n=1, checkimg=True, saveimg=True)
