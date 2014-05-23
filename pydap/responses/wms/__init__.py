@@ -695,8 +695,14 @@ class WMSResponse(BaseResponse):
                         levels = np.arange(actual_range[0], actual_range[1]+dlev, dlev)
                         cmap = get_cmap(cmapname)
                     if fill_method == 'contourf':
+                        newlevels = levels[:]
+                        dtype = newlevels.dtype
+                        if cmap.colorbar_extend in ['min', 'both']:
+                            newlevels = np.insert(newlevels, 0, np.finfo(dtype).min)
+                        if cmap.colorbar_extend in ['max', 'both']:
+                            newlevels = np.append(newlevels, np.finfo(dtype).max)
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
-                                    levels=levels, antialiased=False)
+                                    levels=newlevels, antialiased=False)
                         #newlevels = _contour_levels(levels, cmap.colorbar_extend)
                         #cs = ax.contour(X, Y, data, colors='w', levels=newlevels, 
                         #            antialiased=False)
