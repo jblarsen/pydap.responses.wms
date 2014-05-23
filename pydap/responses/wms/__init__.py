@@ -579,6 +579,7 @@ class WMSResponse(BaseResponse):
 
         # Now we plot the data window until the end of the bbox:
         w, h = size
+        #while np.ma.min(lon) < bbox[2]:
         while np.min(lon) < bbox[2]:
             lon_save = lon[:]
             lat_save = lat[:]
@@ -616,10 +617,13 @@ class WMSResponse(BaseResponse):
                     # When bbox "falls between" grid cells xcond and ycond are
                     # all false. So we have an additional check for that
                     if not xcond.any():
-                        xcond2 = ((lon[:,:-1] < bbox[0]) & (lon[:,1:] > bbox[2]))
+                        xcond2 = ((lon[:,:-1] <= bbox[0]) & (lon[:,1:] >= bbox[2]))
                         xcond[:,:-1] = xcond2
                     if not ycond.any():
-                        ycond2 = ((lat[:-1,:] < bbox[1]) & (lon[1:,:] > bbox[3]))
+                        if lat[0,0] < lat[-1,0]:
+                            ycond2 = ((lat[:-1,:] <= bbox[1]) & (lat[1:,:] >= bbox[3]))
+                        else:
+                            ycond2 = ((lat[:-1,:] >= bbox[3]) & (lat[1:,:] <= bbox[1]))
                         ycond[:-1,:] = ycond2
                     if (not xcond.any() or not ycond.any()):
                         lon += dlon
@@ -1106,4 +1110,7 @@ def project_data(srs, bbox, lon, lat, cyclic):
         dlon = 360.0
     while np.min(lon) > bbox[0]:
         lon -= dlon
+    # TODO: Projections can result in inf values - mask them out
+    #lon = np.ma.masked_invalid(lon)
+    #lat = np.ma.masked_invalid(lat)
     return lon, lat, dlon, do_proj
