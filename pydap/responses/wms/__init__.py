@@ -404,6 +404,7 @@ class WMSResponse(BaseResponse):
             return [ output.getvalue() ]
         return serialize
 
+    #@profile
     def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs):
         # Slice according to time request (WMS-T).
         l = time_slice(time, grids[0], dataset)
@@ -417,7 +418,21 @@ class WMSResponse(BaseResponse):
         lat = np.asarray(get_lat(grids[0], dataset)[:])
 
         # Project data
-        lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
+        # This operation is expensive - cache results using beaker
+        try:
+            lon_str, lat_str, dlon, do_proj = self.cache.get_value(
+                  (grids[0].id, 'project_data'))
+            lon = np.load(StringIO(lon_str))
+            lat = np.load(StringIO(lat_str))
+        except:
+            lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
+            if self.cache:
+                lon_str = StringIO()
+                np.save(lon_str, lon)
+                lat_str = StringIO()
+                np.save(lat_str, lat)
+                self.cache.set_value((grids[0].id, 'project_data'), 
+                                     (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
         base_srs = 'EPSG:4326'
         p_base = pyproj.Proj(init=base_srs)
         p_query = pyproj.Proj(init=srs)
@@ -1069,6 +1084,7 @@ def parse_dict_querystring_lower(environ):
 def time_slice(time, grid, dataset):
     """Slice according to time request (WMS-T)."""
     if time is not None:
+        # NOTE: This is an expensive operation:
         values = np.array(get_time(grid, dataset))
         if len(values.shape) == 0:
             l = None
