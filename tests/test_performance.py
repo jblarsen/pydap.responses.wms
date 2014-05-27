@@ -108,14 +108,19 @@ class WMSResponse(object):
 
     def request(self, layer, srs, checkimg=False, saveimg=False, profiler=None):
         """Requests WMS image from server and returns image"""
+        # For vector request only forward first layer
+        flayer = layer.split(':')[0]
+
         # Mock OWSLib
         openURL = wms_utils.owslib.wms.openURL
         wms_utils.owslib.wms.openURL = openURL_mock(self.path_info, self.handler)
         env = self.base_env.copy()
-        query = wms_utils.get_params_and_bounding_box(self.url, layer, srs)
-        t = wms_utils.get_time(self.url, layer)
+        query = wms_utils.get_params_and_bounding_box(self.url, flayer, srs)
+        t = wms_utils.get_time(self.url, flayer)
         if t is not None:
             query['TIME'] = t[len(t)/2]
+        # Do not use flayer but layer
+        query['LAYERS'] = layer
         qs = urllib.urlencode(query)
         env['QUERY_STRING'] = qs
         if profiler is not None:
@@ -199,8 +204,13 @@ def make_requests(n=1, wmslist=None, layerlist=None, srslist=None, dotiming=Fals
         else:
             layer_list = layerlist[:]
         for layer in layer_list:
+            flayer = layer.split(':')[0]
             if srslist is None:
-                srs_list = wms.get_srs(layer=layer)
+                try:
+                    srs_list = wms.get_srs(layer=flayer)
+                except:
+                    print('Could not find %s in this WMS' % layer)
+                    continue
             else:
                 srs_list = srslist[:]
             for srs in srs_list:
@@ -229,4 +239,16 @@ if __name__ == '__main__':
     #make_requests(n=3, dotiming=True)
     #make_requests(n=3, doprofiling=True)
     #make_requests(n=1, doprofiling=False)
-    make_requests(n=1, checkimg=True, saveimg=True)
+    #make_requests(n=1, checkimg=True, saveimg=True)
+    # Check vector plots
+    datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc',
+                'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_MEDSEA.nc',
+                'data/FCOO/GETM/metoc.dk.velocities.1nm.surface.1h.NS1C-v001C.nc',
+                'data/FCOO/GETM/metoc.full_dom.velocities.surface.3nm.1h.NS1C-v001C.nc',
+                'data/FCOO/GETM/metoc.idk.velocities.600m.surface.1h.DK600-v001C.nc',
+                'data/FCOO/WW3/ww3fcast_sigwave_grd_DKinner_v001C.nc',
+                'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc',
+                'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
+                'data/DMI/HIRLAM/metoc.DMI_HIRLAM-S03_NSBALTIC_3NM_v004C.nc']
+    layers = ['u10:v10', 'u_velocity:v_velocity', 'uu:vv']
+    make_requests(n=10, wmslist=datapaths, layerlist=layers, doprofiling=True, saveimg=False)
