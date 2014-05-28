@@ -214,15 +214,21 @@ class WMSResponse(BaseResponse):
         w, h = 100, 300
         query = parse_dict_querystring_lower(environ)
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
-        figsize = w/dpi, h/dpi
         cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+        orientation = query.get('styles', 'vertical')
+        if orientation == 'horizontal':
+            w, h = 250, 70
+        figsize = w/dpi, h/dpi
 
         def serialize(dataset):
             fix_map_attributes(dataset)
             fig = Figure(figsize=figsize, dpi=dpi)
             fig.set_facecolor('white')
             fig.set_edgecolor('none')
-            ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
+            if orientation == 'vertical':
+                ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
+            else:
+                ax = fig.add_axes([0.05, 0.55, 0.90, 0.40])
             if asbool(query.get('transparent', 'true')):
                 fig.figurePatch.set_alpha(0.0)
                 ax.axesPatch.set_alpha(0.5)
@@ -245,22 +251,36 @@ class WMSResponse(BaseResponse):
                 extend = 'neither'
 
             cb = ColorbarBase(ax, cmap=cmap, norm=norm,
-                    orientation='vertical', extend=extend)
+                    orientation=orientation, extend=extend)
             fontsize = 0
-            for tick in cb.ax.get_yticklabels():
-                txt = tick.get_text()
-                ntxt = len(txt)
-                fontsize = max(int(0.50*w/ntxt), fontsize)
-                fontsize = min(14, fontsize)
-            for tick in cb.ax.get_yticklabels():
-                tick.set_fontsize(fontsize)
-                tick.set_color('black')
+            if orientation == 'vertical':
+                for tick in cb.ax.get_yticklabels():
+                    txt = tick.get_text()
+                    ntxt = len(txt)
+                    fontsize = max(int(0.50*w/ntxt), fontsize)
+                    fontsize = min(14, fontsize)
+                for tick in cb.ax.get_yticklabels():
+                    tick.set_fontsize(fontsize)
+                    tick.set_color('black')
+            else:
+                ticks = cb.ax.get_xticklabels()
+                for tick in ticks:
+                    txt = tick.get_text()
+                    ntxt = len(txt)
+                    fontsize = max(int(1.25*w/(len(ticks)*ntxt)), fontsize)
+                    fontsize = min(12, fontsize)
+                for tick in cb.ax.get_xticklabels():
+                    tick.set_fontsize(fontsize)
+                    tick.set_color('black')
 
             # Decorate colorbar
             if 'units' in grid.attributes and 'long_name' in grid.attributes:
                 units = grid.attributes['units']
                 long_name = grid.attributes['long_name'].capitalize()
-                ax.set_ylabel('%s [%s]' % (long_name, units), fontsize=fontsize)
+                if orientation == 'vertical':
+                    ax.set_ylabel('%s [%s]' % (long_name, units), fontsize=fontsize)
+                else:
+                    ax.set_xlabel('%s [%s]' % (long_name, units), fontsize=12)
 
             # Save to buffer.
             canvas = FigureCanvas(fig)
