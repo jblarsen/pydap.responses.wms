@@ -560,7 +560,7 @@ class WMSResponse(BaseResponse):
                         lons, lats = pyproj.transform(p_query, p_base, X, Y)
                         u,v = rotate_vector(srs, data[0], data[1], lons, lats, 
                                             returnxy=False)
-                    d = np.sqrt(data[0]**2 + data[1]**2)
+                    d = np.ma.sqrt(data[0]**2 + data[1]**2)
                     ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
                               units='inches', scale=4.0, scale_units='inches',
                               width=0.02, antialiased=False)
