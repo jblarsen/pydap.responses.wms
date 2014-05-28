@@ -464,10 +464,11 @@ class WMSResponse(BaseResponse):
             lat_save = lat[:]
             # Retrieve only the data for the request bbox, and at the 
             # optimal resolution (avoiding oversampling).
-            nthin = 36 # Make one vector for every nthin pixels
+            nthin_lon = 36 # Make one vector for every nthin pixels
+            nthin_lat = 54 # Make one vector for every nthin pixels
             if len(lon.shape) == 1:
-                istep = max(1, int(np.floor( (nthin * len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
-                jstep = max(1, int(np.floor( (nthin * len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
+                istep = max(1, int(np.floor( (nthin_lon * len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
+                jstep = max(1, int(np.floor( (nthin_lat * len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
                 #i0 = int(istep/3)
                 #j0 = int(jstep/3)
                 i0 = 0
@@ -515,8 +516,8 @@ class WMSResponse(BaseResponse):
                         lon += dlon
                         continue
 
-                istep = max(1, int(np.floor( (nthin * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
-                jstep = max(1, int(np.floor( (nthin * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
+                istep = max(1, int(np.floor( (nthin_lon * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
+                jstep = max(1, int(np.floor( (nthin_lat * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
                 i0 = 0
                 j0 = 0
                 lon1 = lon[j0::jstep,i0::istep]
