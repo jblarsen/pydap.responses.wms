@@ -309,6 +309,7 @@ class WMSResponse(BaseResponse):
             query = parse_dict_querystring_lower(environ)
             dpi = float(environ.get('pydap.responses.wms.dpi', 80))
             fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
+            vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
             assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
                                    'pcolorfast']
             w = float(query.get('width', 256))
@@ -325,8 +326,10 @@ class WMSResponse(BaseResponse):
             styles = query.get('styles', fill_method)
             if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
                 fill_method = styles
-            return query, dpi, fill_method, time, figsize, bbox, cmapname, srs, styles, w, h
-        query, dpi, fill_method, time, figsize, bbox, cmapname, srs, styles, w, h = \
+            if styles in ['black_quiver', 'black_barbs']:
+                vector_method = styles
+            return query, dpi, fill_method, vector_method, time, figsize, bbox, cmapname, srs, styles, w, h
+        query, dpi, fill_method, vector_method, time, figsize, bbox, cmapname, srs, styles, w, h = \
             prep_map(environ)
 
         def serialize(dataset):
@@ -382,7 +385,7 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, bbox_local, (w, h),
-                                            ax, srs)
+                                            ax, srs, vector_method)
 
             # Save to buffer.
             if bbox is not None:
@@ -425,7 +428,8 @@ class WMSResponse(BaseResponse):
         return serialize
 
     #@profile
-    def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs):
+    def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs,
+                           vector_method):
         # Slice according to time request (WMS-T).
         l = time_slice(time, grids[0], dataset)
 
@@ -562,9 +566,15 @@ class WMSResponse(BaseResponse):
                         u,v = rotate_vector(srs, data[0], data[1], lons, lats, 
                                             returnxy=False)
                     d = np.ma.sqrt(data[0]**2 + data[1]**2)
-                    ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
-                              units='inches', scale=4.0, scale_units='inches',
-                              width=0.02, antialiased=False)
+                    if vector_method == 'black_barbs':
+                        ax.barbs(X, Y, data[0], data[1], pivot='middle',
+                                  antialiased=False)
+                    else:
+                        #if vector_method == 'black_quiver':
+                        ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
+                                  units='inches', scale=4.0, scale_units='inches',
+                                  width=0.02, antialiased=False)
+                        
             lon = lon_save
             lat = lat_save
             lon += dlon
