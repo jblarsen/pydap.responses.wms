@@ -315,6 +315,7 @@ class WMSResponse(BaseResponse):
             w = float(query.get('width', 256))
             h = float(query.get('height', 256))
             time = query.get('time')
+            if time == 'current': time = None
             figsize = w/dpi, h/dpi
             bbox = query.get('bbox', None)
             if bbox is not None:
@@ -722,7 +723,8 @@ class WMSResponse(BaseResponse):
                 else:
                     # FIXME: Do the indexing here if we decide to go for just the first timestep
                     if len(data.shape) > 2:
-                        data = np.asarray(data[0])
+                        # The array proxy object cannot be sliced prior to conversion
+                        data = np.asarray(data)[0]
                     else:
                         data = np.asarray(data)
 

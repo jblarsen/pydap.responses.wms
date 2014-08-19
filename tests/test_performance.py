@@ -134,9 +134,11 @@ class WMSResponse(object):
         if checkimg:
             is_blank = wms_utils.check_blank(result[0])
             if is_blank:
-                raise SystemExit("A blank image was returned!")
+                msg = "Error: Blank image returned for layer=%s; srs=%s" % (layer, srs)
+                msg += "\nQuery string: " + qs
+                raise SystemExit(msg)
             else:
-                print('Image data OK')
+                print('Image data seems OK')
         return result
 
     def request_images(self, url, layer, check_blank=False):
@@ -239,16 +241,16 @@ if __name__ == '__main__':
     #make_requests(n=3, dotiming=True)
     #make_requests(n=3, doprofiling=True)
     #make_requests(n=1, doprofiling=False)
-    #make_requests(n=1, checkimg=True, saveimg=True)
+    make_requests(n=1, checkimg=True, saveimg=True)
     # Check vector plots
-    datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc',
-                'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_MEDSEA.nc',
-                'data/FCOO/GETM/metoc.dk.velocities.1nm.surface.1h.NS1C-v001C.nc',
-                'data/FCOO/GETM/metoc.full_dom.velocities.surface.3nm.1h.NS1C-v001C.nc',
-                'data/FCOO/GETM/metoc.idk.velocities.600m.surface.1h.DK600-v001C.nc',
-                'data/FCOO/WW3/ww3fcast_sigwave_grd_DKinner_v001C.nc',
-                'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc',
-                'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
-                'data/DMI/HIRLAM/metoc.DMI_HIRLAM-S03_NSBALTIC_3NM_v004C.nc']
-    layers = ['u10:v10', 'u_velocity:v_velocity', 'uu:vv']
-    make_requests(n=10, wmslist=datapaths, layerlist=layers, doprofiling=True, saveimg=False)
+    #datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc',
+    #            'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_MEDSEA.nc',
+    #            'data/FCOO/GETM/metoc.dk.velocities.1nm.surface.1h.NS1C-v001C.nc',
+    #            'data/FCOO/GETM/metoc.full_dom.velocities.surface.3nm.1h.NS1C-v001C.nc',
+    #            'data/FCOO/GETM/metoc.idk.velocities.600m.surface.1h.DK600-v001C.nc',
+    #            'data/FCOO/WW3/ww3fcast_sigwave_grd_DKinner_v001C.nc',
+    #            'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc',
+    #            'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
+    #            'data/DMI/HIRLAM/metoc.DMI_HIRLAM-S03_NSBALTIC_3NM_v004C.nc']
+    #layers = ['u10:v10', 'u_velocity:v_velocity', 'uu:vv']
+    #make_requests(n=10, wmslist=datapaths, layerlist=layers, doprofiling=True, saveimg=False)
