@@ -564,7 +564,7 @@ class WMSResponse(BaseResponse):
                 data[1] = fix_data(data[1], grids[1].attributes)
 
                 # plot
-                if data[0].any():
+                if np.ma.getmaskarray(data[0]).any():
                     if do_proj:
                         # Transform back to lat/lon (can be optimized)
                         lons, lats = pyproj.transform(p_query, p_base, X, Y)
@@ -740,7 +740,7 @@ class WMSResponse(BaseResponse):
                 data = fix_data(data, grid.attributes)
 
                 # plot
-                if data.shape and data.any():
+                if data.shape and np.ma.getmaskarray(data).any():
                     plot_method = getattr(ax, fill_method)
                     if cmapname in self.colors:
                         norm = self.colors[cmapname]['norm']
