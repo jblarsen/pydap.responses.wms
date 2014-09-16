@@ -432,7 +432,11 @@ class WMSResponse(BaseResponse):
     def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs,
                            vector_method):
         # Slice according to time request (WMS-T).
-        l = time_slice(time, grids[0], dataset)
+        try:
+            l = time_slice(time, grids[0], dataset)
+        except IndexError:
+            # Return empty image for out of time range requests
+            return
 
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
@@ -584,7 +588,11 @@ class WMSResponse(BaseResponse):
     #@profile
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method, cmapname='jet'):
         # Slice according to time request (WMS-T).
-        l = time_slice(time, grid, dataset)
+        try:
+            l = time_slice(time, grid, dataset)
+        except IndexError:
+            # Return empty image for out of time range requests
+            return
 
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
