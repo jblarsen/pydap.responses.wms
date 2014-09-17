@@ -327,11 +327,16 @@ class WMSResponse(BaseResponse):
             styles = query.get('styles', fill_method)
             if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
                 fill_method = styles
-            if styles in ['black_quiver', 'black_barbs']:
-                vector_method = styles
-            return query, dpi, fill_method, vector_method, time, figsize, bbox, cmapname, srs, styles, w, h
-        query, dpi, fill_method, vector_method, time, figsize, bbox, cmapname, srs, styles, w, h = \
-            prep_map(environ)
+            style_elems = styles.split(',')
+            vector_color = 'k' 
+            if style_elems[0] in ['black_vector', 'black_quiver', 'black_barbs']:
+                vector_method = style_elems[0]
+                if len(style_elems) > 1:
+                    vector_color = style_elems[1]
+            return query, dpi, fill_method, vector_method, vector_color, time, \
+                   figsize, bbox, cmapname, srs, styles, w, h
+        query, dpi, fill_method, vector_method, vector_color, time, figsize, \
+            bbox, cmapname, srs, styles, w, h = prep_map(environ)
 
         def serialize(dataset):
             fix_map_attributes(dataset)
@@ -386,7 +391,7 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, bbox_local, (w, h),
-                                            ax, srs, vector_method)
+                                            ax, srs, vector_method, vector_color)
 
             # Save to buffer.
             if bbox is not None:
@@ -430,7 +435,7 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs,
-                           vector_method):
+                           vector_method, vector_color):
         # Slice according to time request (WMS-T).
         try:
             l = time_slice(time, grids[0], dataset)
@@ -573,12 +578,13 @@ class WMSResponse(BaseResponse):
                     d = np.ma.sqrt(data[0]**2 + data[1]**2)
                     if vector_method == 'black_barbs':
                         ax.barbs(X, Y, data[0], data[1], pivot='middle',
-                                  antialiased=False)
+                                 color=vector_color, antialiased=False)
                     else:
                         #if vector_method == 'black_quiver':
                         ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
                                   units='inches', scale=4.0, scale_units='inches',
-                                  width=0.02, antialiased=False)
+                                  width=0.02, color=vector_color, 
+                                  antialiased=False)
                         
             lon = lon_save
             lat = lat_save
