@@ -138,8 +138,8 @@ class ArrowBarbs(Barbs):
                 barb_list.append(empty_barb)
                 continue
 
-            poly_verts = [(endx, endy), (endx-0.08*length, endy+0.1*length), 
-                          (endx+0.08*length, endy+0.1*length), (endx, endy)]
+            poly_verts = [(endx, endy), (endx-0.1*length, endy+0.2*length), 
+                          (endx+0.1*length, endy+0.2*length), (endx, endy)]
             #poly_verts = [(endx, endy)]
             offset = length
 
