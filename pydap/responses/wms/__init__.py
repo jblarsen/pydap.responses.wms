@@ -39,6 +39,8 @@ from pydap.util.template import GenshiRenderer, StringLoader, TemplateNotFound
 from pydap.util.safeeval import expr_eval
 from pydap.lib import walk, encode_atom
 
+from arrowbarbs import arrow_barbs
+
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
                  'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs']
 
@@ -329,7 +331,8 @@ class WMSResponse(BaseResponse):
                 fill_method = styles
             style_elems = styles.split(',')
             vector_color = 'k' 
-            if style_elems[0] in ['black_vector', 'black_quiver', 'black_barbs']:
+            if style_elems[0] in ['black_vector', 'black_quiver', 
+                                  'black_barbs', 'black_arrowbarbs']:
                 vector_method = style_elems[0]
                 if len(style_elems) > 1:
                     vector_color = style_elems[1]
@@ -578,6 +581,9 @@ class WMSResponse(BaseResponse):
                     d = np.ma.sqrt(data[0]**2 + data[1]**2)
                     if vector_method == 'black_barbs':
                         ax.barbs(X, Y, data[0], data[1], pivot='middle',
+                                 color=vector_color, antialiased=False)
+                    elif vector_method == 'black_arrowbarbs':
+                        arrow_barbs(ax, X, Y, data[0], data[1], pivot='middle',
                                  color=vector_color, antialiased=False)
                     else:
                         #if vector_method == 'black_quiver':
