@@ -409,7 +409,7 @@ class WMSResponse(BaseResponse):
                 buf, size = canvas.print_to_buffer()
                 im = Image.frombuffer('RGBA', size, buf, 'raw', 'RGBA', 0, 1)
                 # Find number of colors
-                colors = im.getcolors(256)
+                colors = im.getcolors(255)
                 # Only convert if the number of colors is less than 256
                 if colors is not None:
                     ncolors = len(colors)
