@@ -40,6 +40,7 @@ from pydap.util.safeeval import expr_eval
 from pydap.lib import walk, encode_atom
 
 from arrowbarbs import arrow_barbs
+import projutils
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
                  'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs']
@@ -462,7 +463,7 @@ class WMSResponse(BaseResponse):
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
         except:
-            lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
+            lon, lat, dlon, do_proj = projutils.project_data(srs, bbox, lon, lat, cyclic)
             if self.cache:
                 lon_str = StringIO()
                 np.save(lon_str, lon)
@@ -576,7 +577,7 @@ class WMSResponse(BaseResponse):
                     if do_proj:
                         # Transform back to lat/lon (can be optimized)
                         lons, lats = pyproj.transform(p_query, p_base, X, Y)
-                        u,v = rotate_vector(srs, data[0], data[1], lons, lats, 
+                        u,v = projutils.rotate_vector(srs, data[0], data[1], lons, lats, 
                                             returnxy=False)
                     d = np.ma.sqrt(data[0]**2 + data[1]**2)
                     if vector_method == 'black_barbs':
@@ -635,7 +636,7 @@ class WMSResponse(BaseResponse):
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
         except:
-            lon, lat, dlon, do_proj = project_data(srs, bbox, lon, lat, cyclic)
+            lon, lat, dlon, do_proj = projutils.project_data(srs, bbox, lon, lat, cyclic)
             if self.cache:
                 lon_str = StringIO()
                 np.save(lon_str, lon)
@@ -752,6 +753,7 @@ class WMSResponse(BaseResponse):
                 data = fix_data(data, grid.attributes)
 
                 # plot
+                #if data.shape and data.any():
                 if data.shape and np.ma.count(data) > 0:
                     plot_method = getattr(ax, fill_method)
                     if cmapname in self.colors:
@@ -1007,108 +1009,6 @@ def find_containing_bounds(axis, v0, v1):
     if not ascending: i0, i1 = len(axis)-i1, len(axis)-i0
     return max(0, i0), min(len(axis), i1)
 
-def rotate_vector(srs,uin,vin,lons,lats,returnxy=False):
-    """
-    Rotate a vector field (``uin,vin``) on a rectilinear grid
-    with longitudes = ``lons`` and latitudes = ``lats`` from
-    geographical (lat/lon) into map projection (x/y) coordinates.
-
-    The vector is returned on the same grid, but rotated into
-    x,y coordinates.
-
-    The input vector field is defined in spherical coordinates (it
-    has eastward and northward components) while the output
-    vector field is rotated to map projection coordinates (relative
-    to x and y). The magnitude of the vector is preserved.
-
-    This method is more or less verbatim copied from matplotlib
-    basemap.
-
-    .. tabularcolumns:: |l|L|
-
-    ==============   ====================================================
-    Arguments        Description
-    ==============   ====================================================
-    uin, vin         input vector field on a lat/lon grid.
-    lons, lats       Arrays containing longitudes and latitudes
-                     (in degrees) of input data in increasing order.
-                     For non-cylindrical projections (those other than
-                     ``cyl``, ``merc``, ``gall`` and ``mill``) lons must
-                     fit within range -180 to 180.
-    ==============   ====================================================
-
-    Returns ``uout, vout`` (rotated vector field).
-    If the optional keyword argument
-    ``returnxy`` is True (default is False),
-    returns ``uout,vout,x,y`` (where ``x,y`` are the map projection
-    coordinates of the grid defined by ``lons,lats``).
-    """
-    # if lons,lats are 1d and uin,vin are 2d, and
-    # lats describes 1st dim of uin,vin, and
-    # lons describes 2nd dim of uin,vin, make lons,lats 2d
-    # with meshgrid.
-    if lons.ndim == lats.ndim == 1 and uin.ndim == vin.ndim == 2 and\
-       uin.shape[1] == vin.shape[1] == lons.shape[0] and\
-       uin.shape[0] == vin.shape[0] == lats.shape[0]:
-        lons, lats = np.meshgrid(lons, lats)
-    else:
-        if not lons.shape == lats.shape == uin.shape == vin.shape:
-            raise TypeError("shapes of lons,lats and uin,vin don't match")
-    base_srs = 'EPSG:4326'
-    p_base = pyproj.Proj(init=base_srs)
-    p_query = pyproj.Proj(init=srs)
-    x, y = pyproj.transform(p_base, p_query, lons, lats)
-    # rotate from geographic to map coordinates.
-    if np.ma.isMaskedArray(uin):
-        mask = np.ma.getmaskarray(uin)
-        masked = True
-        uin = uin.filled(1)
-        vin = vin.filled(1)
-    else:
-        masked = False
-
-    # Map the (lon, lat) vector in the complex plane.
-    uvc = uin + 1j*vin
-    uvmag = np.abs(uvc)
-    theta = np.angle(uvc)
-
-    # Define a displacement (dlon, dlat) that moves all
-    # positions (lons, lats) a small distance in the
-    # direction of the original vector.
-    dc = 1E-5 * np.exp(theta*1j)
-    dlat = dc.imag * np.cos(np.radians(lats))
-    dlon = dc.real
-
-    # Deal with displacements that overshoot the North or South Pole.
-    farnorth = np.abs(lats+dlat) >= 90.0
-    somenorth = farnorth.any()
-    if somenorth:
-        dlon[farnorth] *= -1.0
-        dlat[farnorth] *= -1.0
-
-    # Add displacement to original location and find the native coordinates.
-    lon1 = lons + dlon
-    lat1 = lats + dlat
-    xn, yn = pyproj.transform(p_base, p_query, lon1, lat1)
-
-    # Determine the angle of the displacement in the native coordinates.
-    vecangle = np.arctan2(yn-y, xn-x)
-    if somenorth:
-        vecangle[farnorth] += np.pi
-
-    # Compute the x-y components of the original vector.
-    uvcout = uvmag * np.exp(1j*vecangle)
-    uout = uvcout.real
-    vout = uvcout.imag
-
-    if masked:
-        uout = np.ma.array(uout, mask=mask)
-        vout = np.ma.array(vout, mask=mask)
-    if returnxy:
-        return uout,vout,x,y
-    else:
-        return uout,vout
-
 def _contour_levels(levels, extend):
     """\
     Modifies levels for contouring so that we do not contour
@@ -1160,26 +1060,3 @@ def time_slice(time, grid, dataset):
     if l is not None:
         l = np.where(l == True)[0][0]
     return l
-
-#@cache.cache('project_data')
-def project_data(srs, bbox, lon, lat, cyclic):
-    """Project data and determine increment for going around globe."""
-    base_srs = 'EPSG:4326'
-    do_proj = srs != base_srs
-    if do_proj:
-        p_base = pyproj.Proj(init=base_srs)
-        p_query = pyproj.Proj(init=srs)
-        if len(lon.shape) == 1:
-            lon, lat = np.meshgrid(lon, lat)
-        dlon = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
-        lon, lat = pyproj.transform(p_base, p_query, lon, lat)
-        if bbox[0] > bbox[2] or cyclic:
-            lon = np.where(lon >= 0.0, lon, lon+dlon)
-    else:
-        dlon = 360.0
-    while np.min(lon) > bbox[0]:
-        lon -= dlon
-    # TODO: Projections can result in inf values - mask them out
-    #lon = np.ma.masked_invalid(lon)
-    #lat = np.ma.masked_invalid(lat)
-    return lon, lat, dlon, do_proj
