@@ -118,12 +118,6 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 </Capability>
 </WMT_MS_Capabilities>"""
 
-from beaker.middleware import CacheMiddleware
-def make_cache(app, global_conf, **local_conf):
-    conf = global_conf.copy()
-    conf.update(local_conf)
-    return CacheMiddleware(app, conf)
-
 class WMSResponse(BaseResponse):
 
     __description__ = "Web Map Service image"
