@@ -41,6 +41,7 @@ from pydap.lib import walk, encode_atom
 
 from arrowbarbs import arrow_barbs
 import projutils
+import gridutils
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
                  'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs']
@@ -101,7 +102,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
       <Abstract>${grid.attributes.get('history', '')}</Abstract>
       <?python
           import numpy as np
-          from pydap.responses.wms import get_lon, get_lat, get_time
+          from pydap.responses.wms.gridutils import get_lon, get_lat, get_time
           lon = get_lon(grid, dataset)
           lat = get_lat(grid, dataset)
           time = get_time(grid, dataset)
@@ -224,7 +225,7 @@ class WMSResponse(BaseResponse):
         figsize = w/dpi, h/dpi
 
         def serialize(dataset):
-            fix_map_attributes(dataset)
+            gridutils.fix_map_attributes(dataset)
             fig = Figure(figsize=figsize, dpi=dpi)
             fig.set_facecolor('white')
             fig.set_edgecolor('none')
@@ -300,7 +301,7 @@ class WMSResponse(BaseResponse):
             try:
                 actual_range = grid.attributes['actual_range']
             except KeyError:
-                data = fix_data(np.asarray(grid.array[:]), grid.attributes)
+                data = gridutils.fix_data(np.asarray(grid.array[:]), grid.attributes)
                 actual_range = np.min(data), np.max(data)
             if self.cache:
                 self.cache.set_value((grid.id, 'actual_range'), actual_range)
@@ -343,7 +344,7 @@ class WMSResponse(BaseResponse):
             bbox, cmapname, srs, styles, w, h = prep_map(environ)
 
         def serialize(dataset):
-            fix_map_attributes(dataset)
+            gridutils.fix_map_attributes(dataset)
             # It is apparently expensive to add an axes in matplotlib - so we cache the
             # axes (it is pickled so it is a threadsafe copy)
             try:
@@ -370,10 +371,10 @@ class WMSResponse(BaseResponse):
                     # Plot scalar field
                     names = [dataset] + hlayers
                     grid = reduce(operator.getitem, names)
-                    if is_valid(grid, dataset):
+                    if gridutils.is_valid(grid, dataset):
                         if bbox is None:
-                            lon = get_lon(grid, dataset)
-                            lat = get_lat(grid, dataset)
+                            lon = gridutils.get_lon(grid, dataset)
+                            lat = gridutils.get_lat(grid, dataset)
                             bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
                         else:
                             bbox_local = bbox[:]
@@ -385,11 +386,11 @@ class WMSResponse(BaseResponse):
                     for vlayer in vlayers:
                         names = [dataset] + hlayers[:-2] + [vlayer]
                         grid = reduce(operator.getitem, names)
-                        if not is_valid(grid, dataset):
+                        if not gridutils.is_valid(grid, dataset):
                             raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
                         if bbox is None:
-                            lon = get_lon(grid, dataset)
-                            lat = get_lat(grid, dataset)
+                            lon = gridutils.get_lon(grid, dataset)
+                            lat = gridutils.get_lat(grid, dataset)
                             bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
                         else:
                             bbox_local = bbox[:]
@@ -442,18 +443,18 @@ class WMSResponse(BaseResponse):
                            vector_method, vector_color):
         # Slice according to time request (WMS-T).
         try:
-            l = time_slice(time, grids[0], dataset)
+            l = gridutils.time_slice(time, grids[0], dataset)
         except IndexError:
             # Return empty image for out of time range requests
             return
 
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
-        lon = get_lon(grids[0], dataset)
+        lon = gridutils.get_lon(grids[0], dataset)
         cyclic = hasattr(lon, 'modulo')
         # contourf assumes that the lon/lat arrays are centered on data points
         lon = np.asarray(lon[:])
-        lat = np.asarray(get_lat(grids[0], dataset)[:])
+        lat = np.asarray(gridutils.get_lat(grids[0], dataset)[:])
 
         # Project data
         # This operation is expensive - cache results using beaker
@@ -569,8 +570,8 @@ class WMSResponse(BaseResponse):
                             np.asarray(data[1])[l]]
 
                 # reduce dimensions and mask missing_values
-                data[0] = fix_data(data[0], grids[0].attributes)
-                data[1] = fix_data(data[1], grids[1].attributes)
+                data[0] = gridutils.fix_data(data[0], grids[0].attributes)
+                data[1] = gridutils.fix_data(data[1], grids[1].attributes)
 
                 # plot
                 if np.ma.count(data[0]) > 0:
@@ -602,19 +603,19 @@ class WMSResponse(BaseResponse):
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method, cmapname='jet'):
         # Slice according to time request (WMS-T).
         try:
-            l = time_slice(time, grid, dataset)
+            l = gridutils.time_slice(time, grid, dataset)
         except IndexError:
             # Return empty image for out of time range requests
             return
 
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
-        lon = get_lon(grid, dataset)
+        lon = gridutils.get_lon(grid, dataset)
         cyclic = hasattr(lon, 'modulo')
         if fill_method in ['contour', 'contourf']:
             # contourf assumes that the lon/lat arrays are centered on data points
             lon = np.asarray(lon[:])
-            lat = np.asarray(get_lat(grid, dataset)[:])
+            lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
         else:
             # the other fill methods assume that the lon/lat arrays are bounding
             # the data cells
@@ -623,7 +624,7 @@ class WMSResponse(BaseResponse):
             lon_bounds_name = lon.attributes['bounds']
             lon_bounds = np.asarray(dataset[lon_bounds_name][:])
             lon = np.concatenate((lon_bounds[:,0], lon_bounds[-1:,1]), 0)
-            lat = get_lat(grid, dataset)
+            lat = gridutils.get_lat(grid, dataset)
             lat_bounds_name = lat.attributes['bounds']
             lat_bounds = np.asarray(dataset[lat_bounds_name][:])
             lat = np.concatenate((lat_bounds[:,0], lat_bounds[-1:,1]), 0)
@@ -750,7 +751,7 @@ class WMSResponse(BaseResponse):
                         data = np.asarray(data)
 
                 # reduce dimensions and mask missing_values
-                data = fix_data(data, grid.attributes)
+                data = gridutils.fix_data(data, grid.attributes)
 
                 # plot
                 #if data.shape and data.any():
@@ -794,8 +795,8 @@ class WMSResponse(BaseResponse):
 
     def _get_capabilities(self, environ):
         def serialize(dataset):
-            fix_map_attributes(dataset)
-            grids = [grid for grid in walk(dataset, GridType) if is_valid(grid, dataset)]
+            gridutils.fix_map_attributes(dataset)
+            grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
 
             # Set global lon/lat ranges.
             try:
@@ -806,7 +807,7 @@ class WMSResponse(BaseResponse):
                 except KeyError:
                     lon_range = [np.inf, -np.inf]
                     for grid in grids:
-                        lon = np.asarray(get_lon(grid, dataset)[:])
+                        lon = np.asarray(gridutils.get_lon(grid, dataset)[:])
                         lon_range[0] = min(lon_range[0], np.min(lon))
                         lon_range[1] = max(lon_range[1], np.max(lon))
                 if self.cache:
@@ -819,7 +820,7 @@ class WMSResponse(BaseResponse):
                 except KeyError:
                     lat_range = [np.inf, -np.inf]
                     for grid in grids:
-                        lat = np.asarray(get_lat(grid, dataset)[:])
+                        lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
                         lat_range[0] = min(lat_range[0], np.min(lat))
                         lat_range[1] = max(lat_range[1], np.max(lat))
                 if self.cache:
@@ -853,162 +854,6 @@ class WMSResponse(BaseResponse):
             return [output.encode('utf-8')]
         return serialize
 
-
-def is_valid(grid, dataset):
-    return (get_lon(grid, dataset) is not None and 
-            get_lat(grid, dataset) is not None)
-
-
-def get_lon(grid, dataset):
-    def check_attrs(var):
-        if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
-            var.attributes.get('standard_name', '') == 'longitude'):
-            return var
-        #if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
-        #    var.attributes.get('axis', '').lower() == 'x' or
-        #    var.attributes.get('standard_name', '') == 'longitude'):
-        #    return var
-
-    # check maps first
-    for dim in grid.maps.values():
-        if check_attrs(dim) is not None:
-            return dim
-
-    # check curvilinear grids
-    if hasattr(grid, 'coordinates'):
-        coords = grid.coordinates.split()
-        for coord in coords:
-            if coord in dataset and check_attrs(dataset[coord].array) is not None:
-                return dataset[coord].array
-
-    return None
-
-
-def get_lat(grid, dataset):
-    def check_attrs(var):
-        #if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
-        #    var.attributes.get('axis', '').lower() == 'y' or
-        #    var.attributes.get('standard_name', '') == 'latitude'):
-        #    return var
-        if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
-            var.attributes.get('standard_name', '') == 'latitude'):
-            return var
-
-    # check maps first
-    for dim in grid.maps.values():
-        if check_attrs(dim) is not None:
-            return dim
-
-    # check curvilinear grids
-    if hasattr(grid, 'coordinates'):
-        coords = grid.coordinates.split()
-        for coord in coords:
-            if coord in dataset and check_attrs(dataset[coord].array) is not None:
-                return dataset[coord].array
-
-    return None
-
-
-def get_time(grid, dataset):
-    for dim in grid.maps.values():
-        if ' since ' in dim.attributes.get('units', ''):
-            calendar = dim.attributes.get('calendar', 'standard')
-            try:
-                return netcdftime.num2date(np.asarray(dim), dim.units, calendar)
-            except:
-                pass
-
-    return None
-
-
-def fix_data(data, attrs):
-    if 'missing_value' in attrs:
-        data = np.ma.masked_equal(data, attrs['missing_value'])
-    elif '_FillValue' in attrs:
-        data = np.ma.masked_equal(data, attrs['_FillValue'])
-
-    if attrs.get('scale_factor'): data *= attrs['scale_factor']
-    if attrs.get('add_offset'): data += attrs['add_offset']
-
-    while len(data.shape) > 2:
-        ##data = data[0]
-        data = np.ma.mean(data, 0)
-    return data
-
-
-def fix_map_attributes(dataset):
-    for grid in walk(dataset, GridType):
-        for map_ in grid.maps.values():
-            if not map_.attributes and map_.name in dataset:
-                map_.attributes = dataset[map_.name].attributes.copy()
-
-
-def find_containing_bounds(axis, v0, v1):
-    """
-    Find i0, i1 such that axis[i0:i1] is the minimal array with v0 and v1.
-
-    For example::
-
-        >>> from numpy import *
-        >>> a = arange(10)
-        >>> i0, i1 = find_containing_bounds(a, 1.5, 6.5)
-        >>> print a[i0:i1]
-        [1 2 3 4 5 6 7]
-        >>> i0, i1 = find_containing_bounds(a, 1, 6)
-        >>> print a[i0:i1]
-        [1 2 3 4 5 6]
-        >>> i0, i1 = find_containing_bounds(a, 4, 12)
-        >>> print a[i0:i1]
-        [4 5 6 7 8 9]
-        >>> i0, i1 = find_containing_bounds(a, 4.5, 12)
-        >>> print a[i0:i1]
-        [4 5 6 7 8 9]
-        >>> i0, i1 = find_containing_bounds(a, -4, 7)
-        >>> print a[i0:i1]
-        [0 1 2 3 4 5 6 7]
-        >>> i0, i1 = find_containing_bounds(a, -4, 12)
-        >>> print a[i0:i1]
-        [0 1 2 3 4 5 6 7 8 9]
-        >>> i0, i1 = find_containing_bounds(a, 12, 19)
-        >>> print a[i0:i1]
-        []
-
-    It also works with decreasing axes::
-
-        >>> b = a[::-1]
-        >>> i0, i1 = find_containing_bounds(b, 1.5, 6.5)
-        >>> print b[i0:i1]
-        [7 6 5 4 3 2 1]
-        >>> i0, i1 = find_containing_bounds(b, 1, 6)
-        >>> print b[i0:i1]
-        [6 5 4 3 2 1]
-        >>> i0, i1 = find_containing_bounds(b, 4, 12)
-        >>> print b[i0:i1]
-        [9 8 7 6 5 4]
-        >>> i0, i1 = find_containing_bounds(b, 4.5, 12)
-        >>> print b[i0:i1]
-        [9 8 7 6 5 4]
-        >>> i0, i1 = find_containing_bounds(b, -4, 7)
-        >>> print b[i0:i1]
-        [7 6 5 4 3 2 1 0]
-        >>> i0, i1 = find_containing_bounds(b, -4, 12)
-        >>> print b[i0:i1]
-        [9 8 7 6 5 4 3 2 1 0]
-        >>> i0, i1 = find_containing_bounds(b, 12, 19)
-        >>> print b[i0:i1]
-        []
-    """
-    ascending = axis[1] > axis[0]
-    if not ascending: axis = axis[::-1]
-    i0 = i1 = len(axis)
-    for i, value in enumerate(axis):
-        if value > v0 and i0 == len(axis):
-            i0 = i-1
-        if not v1 > value and i1 == len(axis):
-            i1 = i+1
-    if not ascending: i0, i1 = len(axis)-i1, len(axis)-i0
-    return max(0, i0), min(len(axis), i1)
-
 def _contour_levels(levels, extend):
     """\
     Modifies levels for contouring so that we do not contour
@@ -1033,30 +878,3 @@ def parse_dict_querystring_lower(environ):
         v = query.pop(k)
         query[k.lower()] = v
     return query
-
-def time_slice(time, grid, dataset):
-    """Slice according to time request (WMS-T)."""
-    if time is not None:
-        # NOTE: This is an expensive operation:
-        values = np.array(get_time(grid, dataset))
-        if len(values.shape) == 0:
-            l = None
-        else:
-            l = np.zeros(values.shape, bool)  # get no data by default
-            tokens = time.split(',')
-            for token in tokens:
-                if '/' in token: # range
-                    start, end = token.strip().split('/')
-                    start = iso8601.parse_date(start, default_timezone=None)
-                    end = iso8601.parse_date(end, default_timezone=None)
-                    l[(values >= start) & (values <= end)] = True
-                else:
-                    instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                    l[values == instant] = True
-    else:
-        l = None
-    # TODO: Calculate index directly instead of array first
-    # We do not need to be able to extract multiple time steps
-    if l is not None:
-        l = np.where(l == True)[0][0]
-    return l
