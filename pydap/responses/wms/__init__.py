@@ -42,6 +42,7 @@ from pydap.lib import walk, encode_atom
 from arrowbarbs import arrow_barbs
 import projutils
 import gridutils
+import plotutils
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
                  'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs']
@@ -136,24 +137,8 @@ class WMSResponse(BaseResponse):
         # affect the dataset.
         query = parse_dict_querystring_lower(environ)
 
-        # Set class variable "colors" on first call
-        if not hasattr(WMSResponse, 'colors'):
-            colorfile = environ.get('pydap.responses.wms.colorfile', None)
-            if colorfile is None:
-                WMSResponse.colors = {}
-            else:
-                with open(colorfile, 'r') as file:
-                    colors = json.load(file)
-                    for cname in colors:
-                        levs = colors[cname]['levels']
-                        cols = colors[cname]['colors']
-                        extend = colors[cname]['extend']
-                        cmap, norm = from_levels_and_colors(levs, cols, extend)
-                        colors[cname] = {'cmap': cmap, 'norm': norm}
-                    del levs, cols, extend, cmap, norm, cname
-                    WMSResponse.colors = colors
-                del colorfile
-
+        # Init colors class instance on first invokation
+        self._init_colors(environ)
 
         try:
             dap_query = ['%s=%s' % (k, query[k]) for k in query
@@ -185,16 +170,16 @@ class WMSResponse(BaseResponse):
         else:
             raise HTTPBadRequest('Invalid REQUEST "%s"' % type_)
 
-        # Caching
-        max_age = environ.get('pydap.responses.wms.max_age', None)
-        s_maxage = environ.get('pydap.responses.wms.s_maxage', None)
-        cc_str = 'public'
-        if max_age is not None:
-            cc_str = cc_str + ', max-age=%i' % int(max_age)
-        if s_maxage is not None:
-            cc_str = cc_str + ', s-maxage=%i' % int(s_maxage)
-        if max_age is not None or s_maxage is not None:
-            self.headers.append( ('Cache-Control', cc_str) )
+        # Set response caching headers
+        self._set_caching_headers(environ)
+
+        # Check if we should return a 304 Not Modified response
+        self._check_last_modified(environ)
+
+        return BaseResponse.__call__(self, environ, start_response)
+
+    def _check_last_modified(self, environ):
+        """Check if resource is modified since last_modified header value."""
         if 'HTTP_IF_MODIFIED_SINCE' in environ:
             cache_control = environ.get('HTTP_CACHE_CONTROL')
             if cache_control != 'no-cache':
@@ -205,31 +190,55 @@ class WMSResponse(BaseResponse):
                         if if_modified_since <= last_modified:
                             raise HTTPNotModified
 
+    def _set_caching_headers(self, environ):
+        """Set caching headers"""
+        max_age = environ.get('pydap.responses.wms.max_age', None)
+        s_maxage = environ.get('pydap.responses.wms.s_maxage', None)
+        cc_str = 'public'
+        if max_age is not None:
+            cc_str = cc_str + ', max-age=%i' % int(max_age)
+        if s_maxage is not None:
+            cc_str = cc_str + ', s-maxage=%i' % int(s_maxage)
+        if max_age is not None or s_maxage is not None:
+            self.headers.append( ('Cache-Control', cc_str) )
 
-        return BaseResponse.__call__(self, environ, start_response)
+    def _init_colors(self, environ):
+        """Set class variable "colors" on first call"""
+        if not hasattr(WMSResponse, 'colors'):
+            colorfile = environ.get('pydap.responses.wms.colorfile', None)
+            if colorfile is None:
+                WMSResponse.colors = {}
+            else:
+                with open(colorfile, 'r') as file:
+                    colors = json.load(file)
+                    for cname in colors:
+                        levs = colors[cname]['levels']
+                        cols = colors[cname]['colors']
+                        extend = colors[cname]['extend']
+                        cmap, norm = from_levels_and_colors(levs, cols, extend)
+                        colors[cname] = {'cmap': cmap, 'norm': norm}
+                    del levs, cols, extend, cmap, norm, cname
+                    WMSResponse.colors = colors
+                del colorfile
 
     def _get_colorbar(self, environ):
-        w, h = 100, 300
-        query = parse_dict_querystring_lower(environ)
+        # Get WMS settings
         dpi = float(environ.get('pydap.responses.wms.dpi', 80))
+        paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
+
+        # Get query string parameters
+        query = parse_dict_querystring_lower(environ)
         cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
         orientation = query.get('styles', 'vertical')
+        transparent = asbool(query.get('transparent', 'true'))
+
+        # Set color bar size depending on orientation
+        w, h = 100, 300
         if orientation == 'horizontal':
             w, h = 250, 70
-        figsize = w/dpi, h/dpi
 
         def serialize(dataset):
             gridutils.fix_map_attributes(dataset)
-            fig = Figure(figsize=figsize, dpi=dpi)
-            fig.set_facecolor('white')
-            fig.set_edgecolor('none')
-            if orientation == 'vertical':
-                ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
-            else:
-                ax = fig.add_axes([0.05, 0.55, 0.90, 0.40])
-            if asbool(query.get('transparent', 'true')):
-                fig.figurePatch.set_alpha(0.0)
-                ax.axesPatch.set_alpha(0.5)
 
             # Plot requested grids.
             layers = [layer for layer in query.get('layers', '').split(',')
@@ -238,55 +247,28 @@ class WMSResponse(BaseResponse):
             names = [dataset] + layer.split('.')
             grid = reduce(operator.getitem, names)
 
-            if cmapname in self.colors:
-                norm = self.colors[cmapname]['norm']
-                cmap = self.colors[cmapname]['cmap']
-                extend = cmap.colorbar_extend 
-            else:
-                actual_range = self._get_actual_range(grid)
-                norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
-                cmap = get_cmap(cmapname)
-                extend = 'neither'
+            norm, cmap, extend = self._get_colors(cmapname, grid)
 
-            cb = ColorbarBase(ax, cmap=cmap, norm=norm,
-                    orientation=orientation, extend=extend)
-            fontsize = 0
-            if orientation == 'vertical':
-                for tick in cb.ax.get_yticklabels():
-                    txt = tick.get_text()
-                    ntxt = len(txt)
-                    fontsize = max(int(0.50*w/ntxt), fontsize)
-                    fontsize = min(14, fontsize)
-                for tick in cb.ax.get_yticklabels():
-                    tick.set_fontsize(fontsize)
-                    tick.set_color('black')
-            else:
-                ticks = cb.ax.get_xticklabels()
-                for tick in ticks:
-                    txt = tick.get_text()
-                    ntxt = len(txt)
-                    fontsize = max(int(1.25*w/(len(ticks)*ntxt)), fontsize)
-                    fontsize = min(12, fontsize)
-                for tick in cb.ax.get_xticklabels():
-                    tick.set_fontsize(fontsize)
-                    tick.set_color('black')
+            output = plotutils.make_colorbar(w, h, dpi, grid, orientation, 
+                     transparent, norm, cmap, extend, paletted)
 
-            # Decorate colorbar
-            if 'units' in grid.attributes and 'long_name' in grid.attributes:
-                units = grid.attributes['units']
-                long_name = grid.attributes['long_name'].capitalize()
-                if orientation == 'vertical':
-                    ax.set_ylabel('%s [%s]' % (long_name, units), fontsize=fontsize)
-                else:
-                    ax.set_xlabel('%s [%s]' % (long_name, units), fontsize=12)
-
-            # Save to buffer.
-            canvas = FigureCanvas(fig)
-            output = StringIO() 
-            canvas.print_png(output)
             if hasattr(dataset, 'close'): dataset.close()
             return [ output.getvalue() ]
+
         return serialize
+
+    def _get_colors(self, cmapname, grid):
+        """Returns Normalization, Colormap and extend information."""
+        if cmapname in self.colors:
+            norm = self.colors[cmapname]['norm']
+            cmap = self.colors[cmapname]['cmap']
+            extend = cmap.colorbar_extend 
+        else:
+            actual_range = self._get_actual_range(grid)
+            norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
+            cmap = get_cmap(cmapname)
+            extend = 'neither'
+        return norm, cmap, extend
 
     def _get_actual_range(self, grid):
         try:
@@ -397,36 +379,12 @@ class WMSResponse(BaseResponse):
                 ax.axis( [bbox[0], bbox[2], bbox[1], bbox[3]] )
             ax.axis('off')
             canvas = FigureCanvas(fig)
-            output = StringIO() 
             # Optionally convert to paletted png
             paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
-            def convert_paletted(canvas, output):
-                # Read image
-                buf, size = canvas.print_to_buffer()
-                im = Image.frombuffer('RGBA', size, buf, 'raw', 'RGBA', 0, 1)
-                # Find number of colors
-                colors = im.getcolors(255)
-                # Only convert if the number of colors is less than 256
-                if colors is not None:
-                    ncolors = len(colors)
-                    # Get alpha band
-                    alpha = im.split()[-1]
-                    # Convert to paletted image
-                    im = im.convert("RGB")
-                    im = im.convert("P", palette=Image.ADAPTIVE, colors=ncolors)
-                    # Set all pixel values below ncolors to 1 and the rest to 0
-                    mask = Image.eval(alpha, lambda a: 255 if a <=128 else 0)
-                    # Paste the color of index ncolors and use alpha as a mask
-                    im.paste(ncolors, mask)
-                    # Truncate palette to actual size to save space
-                    im.palette.palette = im.palette.palette[:3*(ncolors+1)]
-                    im.save(output, 'png', optimize=False, transparency=ncolors)
-                else:
-                    canvas.print_png(output)
-                return output
             if paletted:
-                output = convert_paletted(canvas, output)
+                output = plotutils.convert_paletted(canvas)
             else:
+                output = StringIO() 
                 canvas.print_png(output)
             if hasattr(dataset, 'close'): dataset.close()
             return [ output.getvalue() ]
@@ -772,12 +730,13 @@ class WMSResponse(BaseResponse):
                             newlevels = np.append(newlevels, np.finfo(dtype).max)
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=newlevels, antialiased=False)
-                        #newlevels = _contour_levels(levels, cmap.colorbar_extend)
+                        #newlevels = plotutils.modify_contour_levels(levels, cmap.colorbar_extend)
                         #cs = ax.contour(X, Y, data, colors='w', levels=newlevels, 
                         #            antialiased=False)
                         #ax.clabel(cs, inline=1, fontsize=10)
                     elif fill_method == 'contour':
-                        newlevels = _contour_levels(levels, cmap.colorbar_extend)
+                        newlevels = plotutils.modify_contour_levels(levels, 
+                                    cmap.colorbar_extend)
                         cs = plot_method(X, Y, data, colors='black', levels=newlevels, 
                                     antialiased=False)
                         ax.clabel(cs, inline=1, fontsize=10)
@@ -847,18 +806,6 @@ class WMSResponse(BaseResponse):
             if hasattr(dataset, 'close'): dataset.close()
             return [output.encode('utf-8')]
         return serialize
-
-def _contour_levels(levels, extend):
-    """\
-    Modifies levels for contouring so that we do not contour
-    upper and lower bounds.
-    """
-    outlevels = levels[:]
-    if extend in ['min', 'neither']:
-        outlevels = outlevels[:-1]
-    if extend in ['max', 'neither']:
-        outlevels = outlevels[1:]
-    return outlevels
 
 def parse_dict_querystring_lower(environ):
     """Parses query string into dict with keys in lower case."""
