@@ -151,7 +151,6 @@ class WMSResponse(BaseResponse):
                     querystring=dap_query)
             self.cache = environ['beaker.cache'].get_cache(
                     'pydap.responses.wms+' + location)
-            #self.cache = environ['beaker.cache'].get_cache('pydap.responses.wms')
         except KeyError:
             self.cache = None
 
@@ -283,6 +282,7 @@ class WMSResponse(BaseResponse):
                 self.cache.set_value((grid.id, 'actual_range'), actual_range)
         return actual_range
 
+    #@profile
     def _get_map(self, environ):
         def prep_map(environ):
             # Calculate appropriate figure size.
@@ -319,6 +319,7 @@ class WMSResponse(BaseResponse):
         query, dpi, fill_method, vector_method, vector_color, time, figsize, \
             bbox, cmapname, srs, styles, w, h = prep_map(environ)
 
+        #@profile
         def serialize(dataset):
             gridutils.fix_map_attributes(dataset)
             # It is apparently expensive to add an axes in matplotlib - so we cache the
@@ -326,7 +327,7 @@ class WMSResponse(BaseResponse):
             try:
                 fig = cPickle.loads(self.cache.get_value((figsize, 'figure')))
                 ax = fig.get_axes()[0]
-            except:
+            except KeyError:
                 fig = Figure(figsize=figsize, dpi=dpi)
                 ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
                 if self.cache:
@@ -409,14 +410,29 @@ class WMSResponse(BaseResponse):
         lat = np.asarray(gridutils.get_lat(grids[0], dataset)[:])
 
         # Project data
+        base_srs = 'EPSG:4326'
+        try:
+            p_base = self.cache.get_value((base_srs, 'pyproj'))
+        except KeyError:
+            p_base = pyproj.Proj(init=base_srs)
+            if self.cache:
+                self.cache.set_value((base_srs, 'pyproj'), p_base)
+        try:
+            p_query = self.cache.get_value((srs, 'pyproj'))
+        except KeyError:
+            p_query = pyproj.Proj(init=srs)
+            if self.cache:
+                self.cache.set_value((srs, 'pyproj'), p_query)
+
         # This operation is expensive - cache results using beaker
         try:
             lon_str, lat_str, dlon, do_proj = self.cache.get_value(
                   (grids[0].id, 'project_data'))
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
-        except:
-            lon, lat, dlon, do_proj = projutils.project_data(srs, bbox, lon, lat, cyclic)
+        except KeyError:
+            lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
+                                      bbox, lon, lat, cyclic)
             if self.cache:
                 lon_str = StringIO()
                 np.save(lon_str, lon)
@@ -424,9 +440,6 @@ class WMSResponse(BaseResponse):
                 np.save(lat_str, lat)
                 self.cache.set_value((grids[0].id, 'project_data'), 
                                      (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
-        base_srs = 'EPSG:4326'
-        p_base = pyproj.Proj(init=base_srs)
-        p_query = pyproj.Proj(init=srs)
 
         # Now we plot the data window until the end of the bbox:
         w, h = size
@@ -447,8 +460,8 @@ class WMSResponse(BaseResponse):
                 lon1 = lon[i0::istep]
                 lat1 = lat[j0::jstep]
                 # Find containing bound in reduced indices
-                i0r, i1r = find_containing_bounds(lon1, bbox[0], bbox[2])
-                j0r, j1r = find_containing_bounds(lat1, bbox[1], bbox[3])
+                i0r, i1r = gridutils.find_containing_bounds(lon1, bbox[0], bbox[2])
+                j0r, j1r = gridutils.find_containing_bounds(lat1, bbox[1], bbox[3])
                 # Convert reduced indices to global indices
                 i0 = istep*i0r
                 i1 = istep*i1r
@@ -456,8 +469,8 @@ class WMSResponse(BaseResponse):
                 j1 = jstep*j1r
                 lons = lon1[i0r:i1r]
                 lats = lat1[j0r:j1r]
-                data = [np.asarray(grids[0].array[...,j0:j1:jstep,i0:i1:istep]),
-                        np.asarray(grids[1].array[...,j0:j1:jstep,i0:i1:istep])]
+                data = [np.asarray(grids[0].array[l,j0:j1:jstep,i0:i1:istep]),
+                        np.asarray(grids[1].array[l,j0:j1:jstep,i0:i1:istep])]
                 # Fix cyclic data.
                 if cyclic:
                     lons = np.ma.concatenate((lons, lon[0:1] + dlon), 0)
@@ -471,6 +484,21 @@ class WMSResponse(BaseResponse):
             elif len(lon.shape) == 2:
                 i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
                 I, J = np.meshgrid(i, j)
+                """
+                try:
+                    Is, Js = self.cache.get_value((grids[0].id, 'grid_indices'))
+                    I = np.load(StringIO(Is))
+                    J = np.load(StringIO(Js))
+                except KeyError:
+                    I, J = np.meshgrid(i, j)
+                    if self.cache:
+                        Is = StringIO()
+                        np.save(Is, I)
+                        Js = StringIO()
+                        np.save(Js, J)
+                        self.cache.set_value((grids[0].id, 'grid_indices'), 
+                                             (Is.getvalue(), Js.getvalue()))
+                """
 
                 xcond = (lon >= bbox[0]) & (lon <= bbox[2])
                 ycond = (lat >= bbox[1]) & (lat <= bbox[3])
@@ -511,15 +539,17 @@ class WMSResponse(BaseResponse):
                 j1 = jstep*j1r
                 X = lon1[j0r:j1r,i0r:i1r]
                 Y = lat1[j0r:j1r,i0r:i1r]
-                data = [grids[0].array[...,j0:j1:jstep,i0:i1:istep],
-                        grids[1].array[...,j0:j1:jstep,i0:i1:istep]]
+                data = [grids[0].array[l,j0:j1:jstep,i0:i1:istep],
+                        grids[1].array[l,j0:j1:jstep,i0:i1:istep]]
 
             # Plot data.
             if data[0].shape: 
+                """
                 # apply time slices
                 if l is not None:
                     data = [np.asarray(data[0])[l],
                             np.asarray(data[1])[l]]
+                """
 
                 # reduce dimensions and mask missing_values
                 data[0] = gridutils.fix_data(data[0], grids[0].attributes)
@@ -530,8 +560,8 @@ class WMSResponse(BaseResponse):
                     if do_proj:
                         # Transform back to lat/lon (can be optimized)
                         lons, lats = pyproj.transform(p_query, p_base, X, Y)
-                        u,v = projutils.rotate_vector(srs, data[0], data[1], lons, lats, 
-                                            returnxy=False)
+                        u,v = projutils.rotate_vector(p_base, p_query, data[0], 
+                                data[1], lons, lats, returnxy=False)
                     d = np.ma.sqrt(data[0]**2 + data[1]**2)
                     if vector_method == 'black_barbs':
                         ax.barbs(X, Y, data[0], data[1], pivot='middle',
@@ -588,7 +618,7 @@ class WMSResponse(BaseResponse):
                   (grid.id, 'project_data'))
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
-        except:
+        except KeyError:
             lon, lat, dlon, do_proj = projutils.project_data(srs, bbox, lon, lat, cyclic)
             if self.cache:
                 lon_str = StringIO()
@@ -607,8 +637,8 @@ class WMSResponse(BaseResponse):
             # Retrieve only the data for the request bbox, and at the 
             # optimal resolution (avoiding oversampling).
             if len(lon.shape) == 1:
-                i0, i1 = find_containing_bounds(lon, bbox[0], bbox[2])
-                j0, j1 = find_containing_bounds(lat, bbox[1], bbox[3])
+                i0, i1 = gridutils.find_containing_bounds(lon, bbox[0], bbox[2])
+                j0, j1 = gridutils.find_containing_bounds(lat, bbox[1], bbox[3])
                 istep = max(1, int(np.floor( (len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
                 jstep = max(1, int(np.floor( (len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
                 istep = 1

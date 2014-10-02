@@ -160,10 +160,21 @@ def find_containing_bounds(axis, v0, v1):
     return max(0, i0), min(len(axis), i1)
 
 def time_slice(time, grid, dataset):
-    """Slice according to time request (WMS-T)."""
+    """\
+    Slice according to time request (WMS-T). Since it is very expensive to
+    convert the entire grid time array to datetime objects we do the opposite
+    and convert the requested time steps to the unit used in the grid time
+    array.
+    """
     if time is not None:
-        # NOTE: This is an expensive operation:
-        values = np.array(get_time(grid, dataset))
+        for dim in grid.maps.values():
+            if ' since ' in dim.attributes.get('units', ''):
+                calendar = dim.attributes.get('calendar', 'standard')
+                try:
+                    values = np.array(np.asarray(dim))
+                    break
+                except:
+                    pass
         if len(values.shape) == 0:
             l = None
         else:
@@ -177,7 +188,9 @@ def time_slice(time, grid, dataset):
                     l[(values >= start) & (values <= end)] = True
                 else:
                     instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                    l[values == instant] = True
+                    instant = netcdftime.date2num(instant, dim.units, calendar)
+                    l = np.isclose(values, instant)
+                    #l[values == instant] = True
     else:
         l = None
     # TODO: Calculate index directly instead of array first

@@ -7,7 +7,7 @@ from __future__ import division
 import numpy as np
 import pyproj
 
-def rotate_vector(srs,uin,vin,lons,lats,returnxy=False):
+def rotate_vector(p_source,p_target,uin,vin,lons,lats,returnxy=False):
     """
     Rotate a vector field (``uin,vin``) on a rectilinear grid
     with longitudes = ``lons`` and latitudes = ``lats`` from
@@ -54,10 +54,7 @@ def rotate_vector(srs,uin,vin,lons,lats,returnxy=False):
     else:
         if not lons.shape == lats.shape == uin.shape == vin.shape:
             raise TypeError("shapes of lons,lats and uin,vin don't match")
-    base_srs = 'EPSG:4326'
-    p_base = pyproj.Proj(init=base_srs)
-    p_query = pyproj.Proj(init=srs)
-    x, y = pyproj.transform(p_base, p_query, lons, lats)
+    x, y = pyproj.transform(p_source, p_target, lons, lats)
     # rotate from geographic to map coordinates.
     if np.ma.isMaskedArray(uin):
         mask = np.ma.getmaskarray(uin)
@@ -89,7 +86,7 @@ def rotate_vector(srs,uin,vin,lons,lats,returnxy=False):
     # Add displacement to original location and find the native coordinates.
     lon1 = lons + dlon
     lat1 = lats + dlat
-    xn, yn = pyproj.transform(p_base, p_query, lon1, lat1)
+    xn, yn = pyproj.transform(p_source, p_target, lon1, lat1)
 
     # Determine the angle of the displacement in the native coordinates.
     vecangle = np.arctan2(yn-y, xn-x)
@@ -109,7 +106,7 @@ def rotate_vector(srs,uin,vin,lons,lats,returnxy=False):
     else:
         return uout,vout
 
-def project_data(srs, bbox, lon, lat, cyclic):
+def project_data(p_source, p_target, bbox, lon, lat, cyclic):
     """\
     Project data and determine increment for going around globe. Input is
     assumed to be in EPSG:4326.
@@ -127,15 +124,12 @@ def project_data(srs, bbox, lon, lat, cyclic):
     dx -- delta for going around globe once in projection coordinates
     do_proj -- boolean true if output projection differs from EPSG:4326 
     """
-    base_srs = 'EPSG:4326'
-    do_proj = srs != base_srs
+    do_proj = p_source != p_target
     if do_proj:
-        p_base = pyproj.Proj(init=base_srs)
-        p_query = pyproj.Proj(init=srs)
         if len(lon.shape) == 1:
             lon, lat = np.meshgrid(lon, lat)
-        dx = 2.0*pyproj.transform(p_base, p_query, 180.0, 0.0)[0]
-        x, y = pyproj.transform(p_base, p_query, lon, lat)
+        dx = 2.0*pyproj.transform(p_source, p_target, 180.0, 0.0)[0]
+        x, y = pyproj.transform(p_source, p_target, lon, lat)
         # Special handling when request crosses discontinuity
         if bbox[0] > bbox[2]:
         #if bbox[0] > bbox[2] or cyclic:
