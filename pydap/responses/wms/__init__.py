@@ -155,12 +155,14 @@ class WMSResponse(BaseResponse):
         except KeyError:
             self.cache = None
 
+        # Support cross-origin resource sharing (CORS)
+        self.headers.append( ('Access-Control-Allow-Origin', '*') )
+
         # Handle GetMap and GetCapabilities requests
         type_ = query.get('request', 'GetMap')
         if type_ == 'GetCapabilities':
             self.serialize = self._get_capabilities(environ)
             self.headers.append( ('Content-type', 'text/xml') )
-            self.headers.append( ('Access-Control-Allow-Origin', '*') )
         elif type_ == 'GetMap':
             self.serialize = self._get_map(environ)
             self.headers.append( ('Content-type', 'image/png') )
