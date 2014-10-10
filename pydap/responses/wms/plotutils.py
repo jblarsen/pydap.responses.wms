@@ -11,6 +11,7 @@ from matplotlib import rcParams
 
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
+#rcParams['text.antialiased'] = False
 
 try:
     from PIL import Image
@@ -34,6 +35,10 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
     cb = ColorbarBase(ax, cmap=cmap, norm=norm,
             orientation=orientation, extend=extend)
     fontsize = 0
+    cb.solids.set_antialiased(False)
+    cb.patch.set_antialiased(False)
+    cb.outline.set_antialiased(False)
+
     #    ticks.set_antialiased(False)
     if orientation == 'vertical':
         for tick in cb.ax.get_yticklabels():
@@ -49,7 +54,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         for tick in ticks:
             txt = tick.get_text()
             ntxt = len(txt)
-            fontsize = max(int(1.25*width/(len(ticks)*ntxt)), fontsize)
+            fontsize = max(int(0.95*width/(len(ticks)*ntxt)), fontsize)
             fontsize = min(12, fontsize)
         for tick in cb.ax.get_xticklabels():
             tick.set_fontsize(fontsize)
@@ -67,20 +72,18 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
     # Save to buffer.
     canvas = FigureCanvas(fig)
     if paletted:
-        # Since it does not seem to be possible to easily disable antialiasing
-        # for colorbars we manually force the number of paletted colors
-        """
+        # The text on colorbars look bad when we disable antialiasing
+        # entirely. We therefore just force the number of paletted
+        # colors to a reasonable number
         try:
-            # We make reduce the number of colors to the number of colors
-            # in the color scale plus 20 (arbitrary)
+            # We reduce the number of colors to the number of colors
+            # in the color scale plus 20 to allow for some
+            # text antialiasing.
             nother = 20 
             ncolors = len(norm.boundaries) + nother
         except AttributeError:
             ncolors = None
         output = convert_paletted(canvas, ncolors=ncolors)
-        """
-        output = StringIO() 
-        canvas.print_png(output)
     else:
         output = StringIO() 
         canvas.print_png(output)
