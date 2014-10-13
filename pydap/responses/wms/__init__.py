@@ -3,10 +3,8 @@ from __future__ import division
 from cStringIO import StringIO
 import re
 import operator
-import bisect
 import json
 import time
-import copy
 import cPickle
 from rfc822 import parsedate
 
@@ -17,28 +15,20 @@ import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.cm import get_cmap
-from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
-from matplotlib.colors import BoundaryNorm
 from matplotlib import rcParams
 from matplotlib.colors import from_levels_and_colors
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
-import iso8601
-import netcdftime
 import pyproj
-try:
-    from PIL import Image
-except:
-    PIL = None
 
 from pydap.model import *
 from pydap.exceptions import ServerError
 from pydap.responses.lib import BaseResponse
 from pydap.util.template import GenshiRenderer, StringLoader, TemplateNotFound
-from pydap.util.safeeval import expr_eval
-from pydap.lib import walk, encode_atom
+from pydap.lib import walk
 
+# Local imports
 from arrowbarbs import arrow_barbs
 import projutils
 import gridutils
