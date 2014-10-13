@@ -73,7 +73,10 @@ def get_time(grid, dataset):
 
     return None
 
+#@profile
 def fix_data(data, attrs):
+    if len(data.shape) > 2 and data.shape[0] == 1:
+        data = np.asarray(data)[0]
     if 'missing_value' in attrs:
         data = np.ma.masked_equal(data, attrs['missing_value'])
     elif '_FillValue' in attrs:
@@ -83,8 +86,11 @@ def fix_data(data, attrs):
     if attrs.get('add_offset'): data += attrs['add_offset']
 
     while len(data.shape) > 2:
-        ##data = data[0]
-        data = np.ma.mean(data, 0)
+        if data.shape[0] != 1:
+            ##data = data[0]
+            data = np.ma.mean(data, 0)
+        else:
+            data = data[0]
     return data
 
 def fix_map_attributes(dataset):
@@ -176,7 +182,7 @@ def time_slice(time, grid, dataset):
                 except:
                     pass
         if len(values.shape) == 0:
-            l = None
+            l = Ellipsis
         else:
             l = np.zeros(values.shape, bool)  # get no data by default
             tokens = time.split(',')
@@ -192,9 +198,9 @@ def time_slice(time, grid, dataset):
                     l = np.isclose(values, instant)
                     #l[values == instant] = True
     else:
-        l = None
+        l = Ellipsis
     # TODO: Calculate index directly instead of array first
     # We do not need to be able to extract multiple time steps
-    if l is not None:
+    if l is not Ellipsis:
         l = np.where(l == True)[0][0]
     return l
