@@ -109,6 +109,9 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 </Capability>
 </WMT_MS_Capabilities>"""
 
+class OutsideGridException(Exception):
+    pass
+
 class WMSResponse(BaseResponse):
 
     __description__ = "Web Map Service image"
@@ -397,21 +400,16 @@ class WMSResponse(BaseResponse):
             return [ output.getvalue() ]
         return serialize
 
-    #@profile
-    def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs,
-                           vector_method, vector_color):
-        # Slice according to time request (WMS-T).
-        try:
-            l = gridutils.time_slice(time, grids[0], dataset)
-        except IndexError:
-            # Return empty image for out of time range requests
-            return
-
+    def _prepare_grid(self, srs, bbox, grid, dataset):
+        """\
+        Calculates various grid parameters.
+        """
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
-        lon = gridutils.get_lon(grids[0], dataset)
+        lon = gridutils.get_lon(grid, dataset)
         cyclic = hasattr(lon, 'modulo')
-        # Vector plots assume that the lon/lat arrays are centered on data points
+
+        # We assume that lon/lat arrays are centered on data points
         base_srs = 'EPSG:4326'
         do_proj = srs != base_srs
         if do_proj:
@@ -427,23 +425,24 @@ class WMSResponse(BaseResponse):
                 p_query = pyproj.Proj(init=srs)
                 if self.cache:
                     self.cache.set_value((srs, 'pyproj'), p_query)
+
         # This operation is expensive - cache results using beaker
         try:
             lon_str, lat_str, dlon, do_proj = self.cache.get_value(
-                  (grids[0].id, srs, 'project_data'))
+                  (grid.id, srs, 'project_data'))
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
         except KeyError:
             # Project data
             lon = np.asarray(lon[:])
-            lat = np.asarray(gridutils.get_lat(grids[0], dataset)[:])
+            lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
             if not do_proj:
                 dlon = 360.0
             else:
                 # Fetch projected data from disk if possible
                 proj_attr = 'coordinates_' + srs.replace(':', '_')
-                if proj_attr in grids[0].attributes:
-                    proj_coords = grids[0].attributes[proj_attr].split()
+                if proj_attr in grid.attributes:
+                    proj_coords = grid.attributes[proj_attr].split()
                     yname, xname = proj_coords
                     lat = np.asarray(dataset[yname])
                     lon = np.asarray(dataset[xname])
@@ -456,123 +455,188 @@ class WMSResponse(BaseResponse):
                     np.save(lon_str, lon)
                     lat_str = StringIO()
                     np.save(lat_str, lat)
-                    self.cache.set_value((grids[0].id, srs, 'project_data'), 
+                    self.cache.set_value((grid.id, srs, 'project_data'), 
                          (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
 
-        # Now we plot the data window until the end of the bbox:
+        return lon, lat, dlon, cyclic, do_proj, p_base, p_query
+
+    def _find_slices(self, lon, lat, dlon, bbox, cyclic, nthin, size):
+        """Returns slicing information for a given input."""
+        # Retrieve only the data for the request bbox, and at the 
+        # optimal resolution (avoiding oversampling).
         w, h = size
+        nthin_lat, nthin_lon = nthin
+        if len(lon.shape) == 1:
+            I, J = np.arange(lon.shape[0]), np.arange(lat.shape[0])
+
+            # Find points within bounding box
+            xcond = (lon >= bbox[0]) & (lon <= bbox[2])
+            ycond = (lat >= bbox[1]) & (lat <= bbox[3])
+            # Check whether any of the points are in the bounding box
+            if (not xcond.any() or not ycond.any()):
+                # If the bounding box is smaller than the grid cell size
+                # it can "fall between" grid cell centers. In this situation
+                # xcond and ycond are all false but we do want to return
+                # the surrounding points so we perform an additional check
+                # for this before raising an exception.
+                if not xcond.any():
+                    xcond2 = ((lon[:-1] <= bbox[0]) & (lon[1:] >= bbox[2]))
+                    xcond[:-1] = xcond2
+                if not ycond.any():
+                    ycond2 = ((lat[:-1] <= bbox[1]) & (lat[1:] >= bbox[3]))
+                    ycond[:-1] = ycond2
+                if (not xcond.any() or not ycond.any()):
+                    raise OutsideGridException
+
+            istep = max(1, int(np.floor( (nthin_lon * lon.shape[0] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
+            jstep = max(1, int(np.floor( (nthin_lat * lat.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
+            i0 = 0
+            j0 = 0
+            lon1 = lon[i0::istep]
+            lat1 = lat[j0::jstep]
+            # Find containing bound in reduced indices
+            I, J = np.arange(lon1.shape[0]), np.arange(lat1.shape[0])
+            #I, J = np.meshgrid(i, j)
+            xcond = (lon1 >= bbox[0]) & (lon1 <= bbox[2])
+            ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
+            if not xcond.any() or not ycond.any():
+                return
+            i0r = max(np.min(I[xcond])-2, 0)
+            i1r = min(np.max(I[xcond])+3, xcond.shape[0])
+            j0r = max(np.min(J[ycond])-2, 0)
+            j1r = min(np.max(J[ycond])+3, ycond.shape[0])
+            # Convert reduced indices to global indices
+            i0 = istep*i0r
+            i1 = istep*i1r
+            j0 = jstep*j0r
+            j1 = jstep*j1r
+            #i0, i1 = gridutils.find_containing_bounds(lon, bbox[0], bbox[2])
+            #j0, j1 = gridutils.find_containing_bounds(lat, bbox[1], bbox[3])
+
+        elif len(lon.shape) == 2:
+            i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
+            I, J = np.meshgrid(i, j)
+
+            xcond = (lon >= bbox[0]) & (lon <= bbox[2])
+            ycond = (lat >= bbox[1]) & (lat <= bbox[3])
+            if (not xcond.any() or not ycond.any()):
+                # When bbox "falls between" grid cells xcond and ycond are
+                # all false. So we have an additional check for that
+                if not xcond.any():
+                    xcond2 = ((lon[:,:-1] <= bbox[0]) & (lon[:,1:] >= bbox[2]))
+                    xcond[:,:-1] = xcond2
+                if not ycond.any():
+                    if lat[0,0] < lat[-1,0]:
+                        ycond2 = ((lat[:-1,:] <= bbox[1]) & (lat[1:,:] >= bbox[3]))
+                    else:
+                        ycond2 = ((lat[:-1,:] >= bbox[3]) & (lat[1:,:] <= bbox[1]))
+                    ycond[:-1,:] = ycond2
+                if (not xcond.any() or not ycond.any()):
+                    raise OutsideGridException
+
+            istep = max(1, int(np.floor( (nthin_lon * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
+            jstep = max(1, int(np.floor( (nthin_lat * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
+            i0 = 0
+            j0 = 0
+            lon1 = lon[j0::jstep,i0::istep]
+            lat1 = lat[j0::jstep,i0::istep]
+            # Find containing bound in reduced indices
+            i, j = np.arange(lon1.shape[1]), np.arange(lon1.shape[0])
+            I, J = np.meshgrid(i, j)
+            xcond = (lon1 >= bbox[0]) & (lon1 <= bbox[2])
+            ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
+            if not xcond.any() or not ycond.any():
+                raise OutsideGridException
+            i0r = max(np.min(I[xcond])-2, 0)
+            i1r = min(np.max(I[xcond])+3, xcond.shape[1])
+            j0r = max(np.min(J[ycond])-2, 0)
+            j1r = min(np.max(J[ycond])+3, ycond.shape[0])
+            # Convert reduced indices to global indices
+            i0 = istep*i0r
+            i1 = istep*i1r
+            j0 = jstep*j0r
+            j1 = jstep*j1r
+
+        return (j0, j1, jstep), (i0, i1, istep)
+
+    def _extract_data(self, l, (j0, j1, jstep), (i0, i1, istep), 
+                      lat, lon, dlon, cyclic, grids):
+        """Returns coordinate and data arrays given slicing information."""
+        # TODO: Currently we just select the first lon value for cyclic
+        # wrapping. It should be "equally spaced".
+        if len(lon.shape) == 1:
+            X = lon[i0:i1:istep]
+            Y = lat[j0:j1:jstep]
+            X, Y = np.meshgrid(X, Y)
+            # Fix cyclic data.
+            if cyclic:
+                X = np.ma.concatenate((X, X[0:1] + dlon), 0)
+        else:
+            X = lon[j0:j1:jstep,i0:i1:istep]
+            Y = lat[j0:j1:jstep,i0:i1:istep]
+            # Fix cyclic data.
+            """
+            if cyclic:
+                if i0 < 0:
+                    X = np.concatenate((X[:,i0:]-dlon, X), axis=1)
+                    Y = np.concatenate((Y[:,i0:], Y), axis=1)
+                    ii = xcond.shape[1] + i0
+                    data = np.ma.concatenate((grid.array[...,ii:], 
+                                              grid.array[...]), axis=-1)
+                if i1 > xcond.shape[1]:
+                    di = i1 - xcond.shape[1]
+                    X = np.concatenate((X, X[:,:di]+dlon), axis=1)
+                    Y = np.concatenate((Y, Y[:,:di]), axis=1)
+                    if lower:
+                        data = np.ma.concatenate((data[...], 
+                                                  data[...,:di]), axis=-1)
+                    else:
+                        data = np.ma.concatenate((grid.array[...], 
+                                                  grid.array[...,:di]), axis=-1)
+                        lower = True
+            """
+        data = []
+        for grid in grids:
+            gdata = grid.array[l,j0:j1:jstep,i0:i1:istep]
+            if cyclic:
+                gdata = np.ma.concatenate((
+                    gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])[0]), -1)
+            data.append(gdata)
+
+
+        return X, Y, data
+
+    #@profile
+    def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs,
+                           vector_method, vector_color):
+        try:
+            # Slice according to time request (WMS-T).
+            l = gridutils.time_slice(time, grids[0], dataset)
+        except IndexError:
+            # Return empty image for out of time range requests
+            return
+ 
+        # Extract projected grid information
+        lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
+                self._prepare_grid(srs, bbox, grids[0], dataset)
+
+        # Now we plot the data window until the end of the bbox:
+        nthin_lon = 36 # Make one vector for every nthin pixels
+        nthin_lat = 54 # Make one vector for every nthin pixels
+        nthin = (nthin_lat, nthin_lon)
         while np.min(lon) < bbox[2]:
             lon_save = lon[:]
             lat_save = lat[:]
-            # Retrieve only the data for the request bbox, and at the 
-            # optimal resolution (avoiding oversampling).
-            nthin_lon = 36 # Make one vector for every nthin pixels
-            nthin_lat = 54 # Make one vector for every nthin pixels
-            if len(lon.shape) == 1:
-                I, J = np.arange(lon.shape[0]), np.arange(lat.shape[0])
-                xcond = (lon >= bbox[0]) & (lon <= bbox[2])
-                ycond = (lat >= bbox[1]) & (lat <= bbox[3])
-                if (not xcond.any() or not ycond.any()):
-                    # When bbox "falls between" grid cells xcond and ycond are
-                    # all false. So we have an additional check for that
-                    if not xcond.any():
-                        xcond2 = ((lon[:-1] <= bbox[0]) & (lon[1:] >= bbox[2]))
-                        xcond[:-1] = xcond2
-                    if not ycond.any():
-                        ycond2 = ((lat[:-1] <= bbox[1]) & (lat[1:] >= bbox[3]))
-                        ycond[:-1] = ycond2
-                    if (not xcond.any() or not ycond.any()):
-                        lon += dlon
-                        continue
 
-                istep = max(1, int(np.floor( (nthin_lon * lon.shape[0] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
-                jstep = max(1, int(np.floor( (nthin_lat * lat.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
-                i0 = 0
-                j0 = 0
-                lon1 = lon[i0::istep]
-                lat1 = lat[j0::jstep]
-                # Find containing bound in reduced indices
-                I, J = np.arange(lon1.shape[0]), np.arange(lat1.shape[0])
-                #I, J = np.meshgrid(i, j)
-                xcond = (lon1 >= bbox[0]) & (lon1 <= bbox[2])
-                ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
-                if not xcond.any() or not ycond.any():
-                    return
-                i0r = max(np.min(I[xcond])-2, 0)
-                i1r = min(np.max(I[xcond])+3, xcond.shape[0])
-                j0r = max(np.min(J[ycond])-2, 0)
-                j1r = min(np.max(J[ycond])+3, ycond.shape[0])
-                # Convert reduced indices to global indices
-                i0 = istep*i0r
-                i1 = istep*i1r
-                j0 = jstep*j0r
-                j1 = jstep*j1r
-                X = lon1[i0r:i1r]
-                Y = lat1[j0r:j1r]
-                data = [grids[0].array[l,j0:j1:jstep,i0:i1:istep],
-                        grids[1].array[l,j0:j1:jstep,i0:i1:istep]]
-                X, Y = np.meshgrid(X, Y)
-
-            elif len(lon.shape) == 2:
-                i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
-                I, J = np.meshgrid(i, j)
-                """
-                try:
-                    Is, Js = self.cache.get_value((grids[0].id, 'grid_indices'))
-                    I = np.load(StringIO(Is))
-                    J = np.load(StringIO(Js))
-                except KeyError:
-                    I, J = np.meshgrid(i, j)
-                    if self.cache:
-                        Is = StringIO()
-                        np.save(Is, I)
-                        Js = StringIO()
-                        np.save(Js, J)
-                        self.cache.set_value((grids[0].id, 'grid_indices'), 
-                                             (Is.getvalue(), Js.getvalue()))
-                """
-
-                xcond = (lon >= bbox[0]) & (lon <= bbox[2])
-                ycond = (lat >= bbox[1]) & (lat <= bbox[3])
-                if (not xcond.any() or not ycond.any()):
-                    # When bbox "falls between" grid cells xcond and ycond are
-                    # all false. So we have an additional check for that
-                    if not xcond.any():
-                        xcond2 = ((lon[:,:-1] <= bbox[0]) & (lon[:,1:] >= bbox[2]))
-                        xcond[:,:-1] = xcond2
-                    if not ycond.any():
-                        ycond2 = ((lat[:-1,:] <= bbox[1]) & (lat[1:,:] >= bbox[3]))
-                        ycond[:-1,:] = ycond2
-                    if (not xcond.any() or not ycond.any()):
-                        lon += dlon
-                        continue
-
-                istep = max(1, int(np.floor( (nthin_lon * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
-                jstep = max(1, int(np.floor( (nthin_lat * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
-                i0 = 0
-                j0 = 0
-                lon1 = lon[j0::jstep,i0::istep]
-                lat1 = lat[j0::jstep,i0::istep]
-                # Find containing bound in reduced indices
-                i, j = np.arange(lon1.shape[1]), np.arange(lon1.shape[0])
-                I, J = np.meshgrid(i, j)
-                xcond = (lon1 >= bbox[0]) & (lon1 <= bbox[2])
-                ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
-                if not xcond.any() or not ycond.any():
-                    return
-                i0r = max(np.min(I[xcond])-2, 0)
-                i1r = min(np.max(I[xcond])+3, xcond.shape[1])
-                j0r = max(np.min(J[ycond])-2, 0)
-                j1r = min(np.max(J[ycond])+3, ycond.shape[0])
-                # Convert reduced indices to global indices
-                i0 = istep*i0r
-                i1 = istep*i1r
-                j0 = jstep*j0r
-                j1 = jstep*j1r
-                X = lon1[j0r:j1r,i0r:i1r]
-                Y = lat1[j0r:j1r,i0r:i1r]
-                data = [grids[0].array[l,j0:j1:jstep,i0:i1:istep],
-                        grids[1].array[l,j0:j1:jstep,i0:i1:istep]]
+            try:
+                (j0, j1, jstep), (i0, i1, istep) = \
+                self._find_slices(lon, lat, dlon, bbox, cyclic, nthin, size)
+            except OutsideGridException:
+                lon += dlon
+                continue
+            
+            X, Y, data = self._extract_data(l, (j0, j1, jstep),
+                         (i0, i1, istep), lat, lon, dlon, cyclic, grids)
 
             # Plot data.
             if data[0].shape: 
@@ -615,167 +679,38 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method, cmapname='jet'):
-        # Slice according to time request (WMS-T).
+        # We currently only support contour and contourf
+        assert fill_method in ['contour', 'contourf']
+
         try:
+            # Slice according to time request (WMS-T).
             l = gridutils.time_slice(time, grid, dataset)
         except IndexError:
             # Return empty image for out of time range requests
             return
-
-        # Plot the data over all the extension of the bbox.
-        # First we "rewind" the data window to the begining of the bbox:
-        lon = gridutils.get_lon(grid, dataset)
-        cyclic = hasattr(lon, 'modulo')
-        assert fill_method in ['contour', 'contourf']
-        base_srs = 'EPSG:4326'
-        do_proj = srs != base_srs
-        print lon.shape, do_proj
-        if do_proj:
-            try:
-                p_base = self.cache.get_value((base_srs, 'pyproj'))
-            except KeyError:
-                p_base = pyproj.Proj(init=base_srs)
-                if self.cache:
-                    self.cache.set_value((base_srs, 'pyproj'), p_base)
-            try:
-                p_query = self.cache.get_value((srs, 'pyproj'))
-            except KeyError:
-                p_query = pyproj.Proj(init=srs)
-                if self.cache:
-                    self.cache.set_value((srs, 'pyproj'), p_query)
-        # This operation is expensive - cache results using beaker
-        try:
-            lon_str, lat_str, dlon, do_proj = self.cache.get_value(
-                  (grid.id, srs, 'project_data'))
-            lon = np.load(StringIO(lon_str))
-            lat = np.load(StringIO(lat_str))
-        except KeyError:
-            # Project data
-            lon = np.asarray(lon[:])
-            lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
-            if not do_proj:
-                dlon = 360.0
-            else:
-                # Fetch projected data from disk if possible
-                proj_attr = 'coordinates_' + srs.replace(':', '_')
-                print 'got from cache', proj_attr in grid.attributes
-                print proj_attr
-                print grid.attributes
-                if proj_attr in grid.attributes:
-                    proj_coords = grid.attributes[proj_attr].split()
-                    yname, xname = proj_coords
-                    lat = np.asarray(dataset[yname])
-                    lon = np.asarray(dataset[xname])
-                    dlon = dataset[xname].attributes['modulo']
-                else:
-                    lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
-                                      bbox, lon, lat, cyclic)
-                if self.cache:
-                    lon_str = StringIO()
-                    np.save(lon_str, lon)
-                    lat_str = StringIO()
-                    np.save(lat_str, lat)
-                    self.cache.set_value((grid.id, srs, 'project_data'), 
-                         (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
+ 
+        # Extract projected grid information
+        lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
+                  self._prepare_grid(srs, bbox, grid, dataset)
 
         # Now we plot the data window until the end of the bbox:
-        w, h = size
-        #while np.ma.min(lon) < bbox[2]:
+        nthin_lon = 5 # Extract a maximum of every nthin_lon pixel in lon dir
+        nthin_lat = 5 # Extract a maximum of every nthin_lat pixel in lat dir
+        nthin = (nthin_lat, nthin_lon)
         while np.min(lon) < bbox[2]:
             lon_save = lon[:]
             lat_save = lat[:]
-            # Retrieve only the data for the request bbox, and at the 
-            # optimal resolution (avoiding oversampling).
-            print 'lon', lon.shape
-            if len(lon.shape) == 1:
-                nthin = 1
-                i0, i1 = gridutils.find_containing_bounds(lon, bbox[0], bbox[2])
-                j0, j1 = gridutils.find_containing_bounds(lat, bbox[1], bbox[3])
-                istep = max(1, int(np.floor( (nthin * len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
-                jstep = max(1, int(np.floor( (nthin * len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
-                print 'stepping', istep, jstep
-                lons = lon[i0:i1:istep]
-                lats = lat[j0:j1:jstep]
-                # FIXME: We must select time step here
-                if fill_method in ['contour', 'contourf']:
-                    data = grid.array[l,j0:j1:jstep,i0:i1:istep]
-                    print data.shape
-                    data = np.asarray(data)[0]
-                else:
-                    data = np.asarray(grid.array[l,j0:j1-1:jstep,i0:i1-1:istep])[0]
-                print 'a', l,j0,j1,jstep,i0,i1,istep,data.shape,type(data)
 
-                # Fix cyclic data.
-                if cyclic and fill_method in ['contour', 'contourf']:
-                    lons = np.ma.concatenate((lons, lon[0:1] + dlon), 0)
-                    #print 'b', data.shape, grid.array[l,j0:j1:jstep,0:1].shape
-
-                    data = np.ma.concatenate((
-                        data, np.asarray(grid.array[l,j0:j1:jstep,0:1])[0]), -1)
-                    print 'b'
-
-                X, Y = np.meshgrid(lons, lats)
-
-            elif len(lon.shape) == 2:
-                i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
-                I, J = np.meshgrid(i, j)
-
-                xcond = (lon >= bbox[0]) & (lon <= bbox[2])
-                ycond = (lat >= bbox[1]) & (lat <= bbox[3])
-                if (not xcond.any() or not ycond.any()):
-                    # When bbox "falls between" grid cells xcond and ycond are
-                    # all false. So we have an additional check for that
-                    if not xcond.any():
-                        xcond2 = ((lon[:,:-1] <= bbox[0]) & (lon[:,1:] >= bbox[2]))
-                        xcond[:,:-1] = xcond2
-                    if not ycond.any():
-                        if lat[0,0] < lat[-1,0]:
-                            ycond2 = ((lat[:-1,:] <= bbox[1]) & (lat[1:,:] >= bbox[3]))
-                        else:
-                            ycond2 = ((lat[:-1,:] >= bbox[3]) & (lat[1:,:] <= bbox[1]))
-                        ycond[:-1,:] = ycond2
-                    if (not xcond.any() or not ycond.any()):
-                        lon += dlon
-                        continue
-                i0 = np.min(I[xcond])-2
-                i1 = np.max(I[xcond])+3
-                lower = False
-                if cyclic:
-                    if i0 < 0:
-                        lon = np.concatenate((lon[:,i0:]-dlon, lon), axis=1)
-                        lat = np.concatenate((lat[:,i0:], lat), axis=1)
-                        ii = xcond.shape[1] + i0
-                        data = np.ma.concatenate((grid.array[...,ii:], 
-                                                  grid.array[...]), axis=-1)
-                        i1 = i1 - i0
-                        i0 = 0
-                        lower = True
-                    if i1 > xcond.shape[1]:
-                        di = i1 - xcond.shape[1]
-                        lon = np.concatenate((lon, lon[:,:di]+dlon), axis=1)
-                        lat = np.concatenate((lat, lat[:,:di]), axis=1)
-                        if lower:
-                            data = np.ma.concatenate((data[...], 
-                                                      data[...,:di]), axis=-1)
-                        else:
-                            data = np.ma.concatenate((grid.array[...], 
-                                                      grid.array[...,:di]), axis=-1)
-                            lower = True
-                else:
-                    i0 = max(i0, 0)
-                    i1 = min(i1, xcond.shape[1])
-
-                j0 = max(np.min(J[ycond])-2, 0)
-                j1 = min(np.max(J[ycond])+3, ycond.shape[0])
-                istep = max(1, int(np.floor( (lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.max(lon)-np.amin(lon))) )))
-                jstep = max(1, int(np.floor( (lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.max(lat)-np.amin(lat))) )))
-
-                X = lon[j0:j1:jstep,i0:i1:istep]
-                Y = lat[j0:j1:jstep,i0:i1:istep]
-                if lower:
-                    data = data[...,j0:j1:jstep,i0:i1:istep]
-                else:
-                    data = grid.array[...,j0:j1:jstep,i0:i1:istep]
+            try:
+                (j0, j1, jstep), (i0, i1, istep) = \
+                self._find_slices(lon, lat, dlon, bbox, cyclic, nthin, size)
+            except OutsideGridException:
+                lon += dlon
+                continue
+            
+            X, Y, data = self._extract_data(l, (j0, j1, jstep),
+                         (i0, i1, istep), lat, lon, dlon, cyclic, [grid])
+            data = data[0]
 
             # Plot data.
             if data.shape: 
@@ -818,7 +753,6 @@ class WMSResponse(BaseResponse):
                             newlevels = np.insert(newlevels, 0, np.finfo(dtype).min)
                         if cmap.colorbar_extend in ['max', 'both']:
                             newlevels = np.append(newlevels, np.finfo(dtype).max)
-                        # FIXME: Subsampling does not work
                         print data.shape
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=newlevels, antialiased=False)
