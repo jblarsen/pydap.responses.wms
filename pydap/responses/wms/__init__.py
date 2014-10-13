@@ -130,6 +130,7 @@ class WMSResponse(BaseResponse):
         BaseResponse.__init__(self, dataset)
         self.headers.append( ('Content-description', 'dods_wms') )
 
+    #@profile
     def __call__(self, environ, start_response):
         # Create a Beaker cache dependent on the query string, since
         # most (all?) pre-computed values will depend on the specific
@@ -154,12 +155,14 @@ class WMSResponse(BaseResponse):
         except KeyError:
             self.cache = None
 
+        # Enable cross-origin resource sharing (CORS)
+        self.headers.append( ('Access-Control-Allow-Origin', '*') )
+
         # Handle GetMap and GetCapabilities requests
         type_ = query.get('request', 'GetMap')
         if type_ == 'GetCapabilities':
             self.serialize = self._get_capabilities(environ)
             self.headers.append( ('Content-type', 'text/xml') )
-            self.headers.append( ('Access-Control-Allow-Origin', '*') )
         elif type_ == 'GetMap':
             self.serialize = self._get_map(environ)
             self.headers.append( ('Content-type', 'image/png') )
@@ -221,22 +224,31 @@ class WMSResponse(BaseResponse):
                 del colorfile
 
     def _get_colorbar(self, environ):
-        # Get WMS settings
-        dpi = float(environ.get('pydap.responses.wms.dpi', 80))
-        paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
-
-        # Get query string parameters
-        query = parse_dict_querystring_lower(environ)
-        cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
-        orientation = query.get('styles', 'vertical')
-        transparent = asbool(query.get('transparent', 'true'))
-
-        # Set color bar size depending on orientation
-        w, h = 100, 300
-        if orientation == 'horizontal':
-            w, h = 250, 70
-
         def serialize(dataset):
+            # Get query string parameters
+            query = parse_dict_querystring_lower(environ)
+            cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+
+            # Check for cached version of colorbar
+            try:
+                output = self.cache.get_value(('colorbar', cmapname))
+                return [output]
+            except KeyError:
+                pass
+
+            # Get more query string parameters
+            orientation = query.get('styles', 'vertical')
+            transparent = asbool(query.get('transparent', 'true'))
+
+            # Get WMS settings
+            dpi = float(environ.get('pydap.responses.wms.dpi', 80))
+            paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
+
+            # Set color bar size depending on orientation
+            w, h = 100, 300
+            if orientation == 'horizontal':
+                w, h = 250, 70
+
             gridutils.fix_map_attributes(dataset)
 
             # Plot requested grids.
@@ -252,7 +264,11 @@ class WMSResponse(BaseResponse):
                      transparent, norm, cmap, extend, paletted)
 
             if hasattr(dataset, 'close'): dataset.close()
-            return [ output.getvalue() ]
+            output = output.getvalue()
+            if self.cache:
+                self.cache.set_value(('colorbar', cmapname), output)
+
+            return [output]
 
         return serialize
 
@@ -405,41 +421,53 @@ class WMSResponse(BaseResponse):
         # First we "rewind" the data window to the begining of the bbox:
         lon = gridutils.get_lon(grids[0], dataset)
         cyclic = hasattr(lon, 'modulo')
-        # contourf assumes that the lon/lat arrays are centered on data points
-        lon = np.asarray(lon[:])
-        lat = np.asarray(gridutils.get_lat(grids[0], dataset)[:])
-
-        # Project data
+        # Vector plots assume that the lon/lat arrays are centered on data points
         base_srs = 'EPSG:4326'
-        try:
-            p_base = self.cache.get_value((base_srs, 'pyproj'))
-        except KeyError:
-            p_base = pyproj.Proj(init=base_srs)
-            if self.cache:
-                self.cache.set_value((base_srs, 'pyproj'), p_base)
-        try:
-            p_query = self.cache.get_value((srs, 'pyproj'))
-        except KeyError:
-            p_query = pyproj.Proj(init=srs)
-            if self.cache:
-                self.cache.set_value((srs, 'pyproj'), p_query)
-
+        do_proj = srs != base_srs
+        if do_proj:
+            try:
+                p_base = self.cache.get_value((base_srs, 'pyproj'))
+            except KeyError:
+                p_base = pyproj.Proj(init=base_srs)
+                if self.cache:
+                    self.cache.set_value((base_srs, 'pyproj'), p_base)
+            try:
+                p_query = self.cache.get_value((srs, 'pyproj'))
+            except KeyError:
+                p_query = pyproj.Proj(init=srs)
+                if self.cache:
+                    self.cache.set_value((srs, 'pyproj'), p_query)
         # This operation is expensive - cache results using beaker
         try:
             lon_str, lat_str, dlon, do_proj = self.cache.get_value(
-                  (grids[0].id, 'project_data'))
+                  (grids[0].id, srs, 'project_data'))
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
         except KeyError:
-            lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
+            # Project data
+            lon = np.asarray(lon[:])
+            lat = np.asarray(gridutils.get_lat(grids[0], dataset)[:])
+            if not do_proj:
+                dlon = 360.0
+            else:
+                # Fetch projected data from disk if possible
+                proj_attr = 'coordinates_' + srs.replace(':', '_')
+                if proj_attr in grids[0].attributes:
+                    proj_coords = grids[0].attributes[proj_attr].split()
+                    yname, xname = proj_coords
+                    lat = np.asarray(dataset[yname])
+                    lon = np.asarray(dataset[xname])
+                    dlon = dataset[xname].attributes['modulo']
+                else:
+                    lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
                                       bbox, lon, lat, cyclic)
-            if self.cache:
-                lon_str = StringIO()
-                np.save(lon_str, lon)
-                lat_str = StringIO()
-                np.save(lat_str, lat)
-                self.cache.set_value((grids[0].id, 'project_data'), 
-                                     (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
+                if self.cache:
+                    lon_str = StringIO()
+                    np.save(lon_str, lon)
+                    lat_str = StringIO()
+                    np.save(lat_str, lat)
+                    self.cache.set_value((grids[0].id, srs, 'project_data'), 
+                         (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
 
         # Now we plot the data window until the end of the bbox:
         w, h = size
@@ -451,35 +479,49 @@ class WMSResponse(BaseResponse):
             nthin_lon = 36 # Make one vector for every nthin pixels
             nthin_lat = 54 # Make one vector for every nthin pixels
             if len(lon.shape) == 1:
-                istep = max(1, int(np.floor( (nthin_lon * len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
-                jstep = max(1, int(np.floor( (nthin_lat * len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
-                #i0 = int(istep/3)
-                #j0 = int(jstep/3)
+                I, J = np.arange(lon.shape[0]), np.arange(lat.shape[0])
+                xcond = (lon >= bbox[0]) & (lon <= bbox[2])
+                ycond = (lat >= bbox[1]) & (lat <= bbox[3])
+                if (not xcond.any() or not ycond.any()):
+                    # When bbox "falls between" grid cells xcond and ycond are
+                    # all false. So we have an additional check for that
+                    if not xcond.any():
+                        xcond2 = ((lon[:-1] <= bbox[0]) & (lon[1:] >= bbox[2]))
+                        xcond[:-1] = xcond2
+                    if not ycond.any():
+                        ycond2 = ((lat[:-1] <= bbox[1]) & (lat[1:] >= bbox[3]))
+                        ycond[:-1] = ycond2
+                    if (not xcond.any() or not ycond.any()):
+                        lon += dlon
+                        continue
+
+                istep = max(1, int(np.floor( (nthin_lon * lon.shape[0] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
+                jstep = max(1, int(np.floor( (nthin_lat * lat.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
                 i0 = 0
                 j0 = 0
                 lon1 = lon[i0::istep]
                 lat1 = lat[j0::jstep]
                 # Find containing bound in reduced indices
-                i0r, i1r = gridutils.find_containing_bounds(lon1, bbox[0], bbox[2])
-                j0r, j1r = gridutils.find_containing_bounds(lat1, bbox[1], bbox[3])
+                I, J = np.arange(lon1.shape[0]), np.arange(lat1.shape[0])
+                #I, J = np.meshgrid(i, j)
+                xcond = (lon1 >= bbox[0]) & (lon1 <= bbox[2])
+                ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
+                if not xcond.any() or not ycond.any():
+                    return
+                i0r = max(np.min(I[xcond])-2, 0)
+                i1r = min(np.max(I[xcond])+3, xcond.shape[0])
+                j0r = max(np.min(J[ycond])-2, 0)
+                j1r = min(np.max(J[ycond])+3, ycond.shape[0])
                 # Convert reduced indices to global indices
                 i0 = istep*i0r
                 i1 = istep*i1r
                 j0 = jstep*j0r
                 j1 = jstep*j1r
-                lons = lon1[i0r:i1r]
-                lats = lat1[j0r:j1r]
-                data = [np.asarray(grids[0].array[l,j0:j1:jstep,i0:i1:istep]),
-                        np.asarray(grids[1].array[l,j0:j1:jstep,i0:i1:istep])]
-                # Fix cyclic data.
-                if cyclic:
-                    lons = np.ma.concatenate((lons, lon[0:1] + dlon), 0)
-                    data[0] = np.ma.concatenate((
-                        data[0], grids[0].array[...,j0:j1:jstep,0:1]), -1)
-                    data[1] = np.ma.concatenate((
-                        data[1], grids[1].array[...,j0:j1:jstep,0:1]), -1)
-
-                X, Y = np.meshgrid(lons, lats)
+                X = lon1[i0r:i1r]
+                Y = lat1[j0r:j1r]
+                data = [grids[0].array[l,j0:j1:jstep,i0:i1:istep],
+                        grids[1].array[l,j0:j1:jstep,i0:i1:istep]]
+                X, Y = np.meshgrid(X, Y)
 
             elif len(lon.shape) == 2:
                 i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
@@ -509,7 +551,7 @@ class WMSResponse(BaseResponse):
                         xcond2 = ((lon[:,:-1] <= bbox[0]) & (lon[:,1:] >= bbox[2]))
                         xcond[:,:-1] = xcond2
                     if not ycond.any():
-                        ycond2 = ((lat[:-1,:] <= bbox[1]) & (lon[1:,:] >= bbox[3]))
+                        ycond2 = ((lat[:-1,:] <= bbox[1]) & (lat[1:,:] >= bbox[3]))
                         ycond[:-1,:] = ycond2
                     if (not xcond.any() or not ycond.any()):
                         lon += dlon
@@ -594,39 +636,57 @@ class WMSResponse(BaseResponse):
         # First we "rewind" the data window to the begining of the bbox:
         lon = gridutils.get_lon(grid, dataset)
         cyclic = hasattr(lon, 'modulo')
-        if fill_method in ['contour', 'contourf']:
-            # contourf assumes that the lon/lat arrays are centered on data points
-            lon = np.asarray(lon[:])
-            lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
-        else:
-            # the other fill methods assume that the lon/lat arrays are bounding
-            # the data cells
-            if not 'bounds' in lon.attributes:
-                raise ServerError('Bounds attributes missing in NetCDF file')
-            lon_bounds_name = lon.attributes['bounds']
-            lon_bounds = np.asarray(dataset[lon_bounds_name][:])
-            lon = np.concatenate((lon_bounds[:,0], lon_bounds[-1:,1]), 0)
-            lat = gridutils.get_lat(grid, dataset)
-            lat_bounds_name = lat.attributes['bounds']
-            lat_bounds = np.asarray(dataset[lat_bounds_name][:])
-            lat = np.concatenate((lat_bounds[:,0], lat_bounds[-1:,1]), 0)
-
-        # Project data
+        assert fill_method in ['contour', 'contourf']
+        base_srs = 'EPSG:4326'
+        do_proj = srs != base_srs
+        print lon.shape, do_proj
+        if do_proj:
+            try:
+                p_base = self.cache.get_value((base_srs, 'pyproj'))
+            except KeyError:
+                p_base = pyproj.Proj(init=base_srs)
+                if self.cache:
+                    self.cache.set_value((base_srs, 'pyproj'), p_base)
+            try:
+                p_query = self.cache.get_value((srs, 'pyproj'))
+            except KeyError:
+                p_query = pyproj.Proj(init=srs)
+                if self.cache:
+                    self.cache.set_value((srs, 'pyproj'), p_query)
         # This operation is expensive - cache results using beaker
         try:
             lon_str, lat_str, dlon, do_proj = self.cache.get_value(
-                  (grid.id, 'project_data'))
+                  (grid.id, srs, 'project_data'))
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
         except KeyError:
-            lon, lat, dlon, do_proj = projutils.project_data(srs, bbox, lon, lat, cyclic)
-            if self.cache:
-                lon_str = StringIO()
-                np.save(lon_str, lon)
-                lat_str = StringIO()
-                np.save(lat_str, lat)
-                self.cache.set_value((grid.id, 'project_data'), 
-                                     (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
+            # Project data
+            lon = np.asarray(lon[:])
+            lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
+            if not do_proj:
+                dlon = 360.0
+            else:
+                # Fetch projected data from disk if possible
+                proj_attr = 'coordinates_' + srs.replace(':', '_')
+                print 'got from cache', proj_attr in grid.attributes
+                print proj_attr
+                print grid.attributes
+                if proj_attr in grid.attributes:
+                    proj_coords = grid.attributes[proj_attr].split()
+                    yname, xname = proj_coords
+                    lat = np.asarray(dataset[yname])
+                    lon = np.asarray(dataset[xname])
+                    dlon = dataset[xname].attributes['modulo']
+                else:
+                    lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
+                                      bbox, lon, lat, cyclic)
+                if self.cache:
+                    lon_str = StringIO()
+                    np.save(lon_str, lon)
+                    lat_str = StringIO()
+                    np.save(lat_str, lat)
+                    self.cache.set_value((grid.id, srs, 'project_data'), 
+                         (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
 
         # Now we plot the data window until the end of the bbox:
         w, h = size
@@ -636,25 +696,33 @@ class WMSResponse(BaseResponse):
             lat_save = lat[:]
             # Retrieve only the data for the request bbox, and at the 
             # optimal resolution (avoiding oversampling).
+            print 'lon', lon.shape
             if len(lon.shape) == 1:
+                nthin = 1
                 i0, i1 = gridutils.find_containing_bounds(lon, bbox[0], bbox[2])
                 j0, j1 = gridutils.find_containing_bounds(lat, bbox[1], bbox[3])
-                istep = max(1, int(np.floor( (len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
-                jstep = max(1, int(np.floor( (len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
-                istep = 1
-                jstep = 1
+                istep = max(1, int(np.floor( (nthin * len(lon) * (bbox[2]-bbox[0])) / (w * abs(lon[-1]-lon[0])) )))
+                jstep = max(1, int(np.floor( (nthin * len(lat) * (bbox[3]-bbox[1])) / (h * abs(lat[-1]-lat[0])) )))
+                print 'stepping', istep, jstep
                 lons = lon[i0:i1:istep]
                 lats = lat[j0:j1:jstep]
+                # FIXME: We must select time step here
                 if fill_method in ['contour', 'contourf']:
-                    data = grid.array[...,j0:j1:jstep,i0:i1:istep]
+                    data = grid.array[l,j0:j1:jstep,i0:i1:istep]
+                    print data.shape
+                    data = np.asarray(data)[0]
                 else:
-                    data = grid.array[...,j0:j1-1:jstep,i0:i1-1:istep]
+                    data = np.asarray(grid.array[l,j0:j1-1:jstep,i0:i1-1:istep])[0]
+                print 'a', l,j0,j1,jstep,i0,i1,istep,data.shape,type(data)
 
                 # Fix cyclic data.
                 if cyclic and fill_method in ['contour', 'contourf']:
                     lons = np.ma.concatenate((lons, lon[0:1] + dlon), 0)
+                    #print 'b', data.shape, grid.array[l,j0:j1:jstep,0:1].shape
+
                     data = np.ma.concatenate((
-                        data, grid.array[...,j0:j1:jstep,0:1]), -1)
+                        data, np.asarray(grid.array[l,j0:j1:jstep,0:1])[0]), -1)
+                    print 'b'
 
                 X, Y = np.meshgrid(lons, lats)
 
@@ -723,7 +791,9 @@ class WMSResponse(BaseResponse):
             if data.shape: 
                 # apply time slices
                 if l is not None:
-                    data = np.asarray(data[l])
+                    print l, data.shape, type(data)
+                    data = np.asarray(data)
+                    print l, data.shape, type(data)
                 else:
                     # FIXME: Do the indexing here if we decide to go for just the first timestep
                     if len(data.shape) > 2:
@@ -758,6 +828,8 @@ class WMSResponse(BaseResponse):
                             newlevels = np.insert(newlevels, 0, np.finfo(dtype).min)
                         if cmap.colorbar_extend in ['max', 'both']:
                             newlevels = np.append(newlevels, np.finfo(dtype).max)
+                        # FIXME: Subsampling does not work
+                        print data.shape
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=newlevels, antialiased=False)
                         #newlevels = plotutils.modify_contour_levels(levels, cmap.colorbar_extend)
@@ -778,6 +850,18 @@ class WMSResponse(BaseResponse):
 
     def _get_capabilities(self, environ):
         def serialize(dataset):
+            # Check for cached version of XML document
+            last_modified = None
+            for header in environ['pydap.headers']:
+                if 'Last-modified' in header:
+                    last_modified = header[1]
+            if last_modified is not None:
+                try:
+                    output = self.cache.get_value(('capabilities', last_modified))
+                    return [output]
+                except KeyError:
+                    pass
+
             gridutils.fix_map_attributes(dataset)
             grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
 
@@ -834,7 +918,10 @@ class WMSResponse(BaseResponse):
 
             output = renderer.render(template, context, output_format='text/xml')
             if hasattr(dataset, 'close'): dataset.close()
-            return [output.encode('utf-8')]
+            output = output.encode('utf-8')
+            if last_modified is not None and self.cache:
+                self.cache.set_value(('capabilities', last_modified), output)
+            return [output]
         return serialize
 
 def parse_dict_querystring_lower(environ):
