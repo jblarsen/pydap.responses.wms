@@ -106,7 +106,9 @@ class WMSResponse(object):
         wms_utils.owslib.wms.openURL = openURL
         return crs_list
 
-    def request(self, layer, srs, checkimg=False, saveimg=False, profiler=None):
+    #@profile
+    def request(self, layer, srs, dotiming=False, checkimg=False, saveimg=False,
+                profiler=None):
         """Requests WMS image from server and returns image"""
         # For vector request only forward first layer
         flayer = layer.split(':')[0]
@@ -123,11 +125,17 @@ class WMSResponse(object):
         query['LAYERS'] = layer
         qs = urllib.urlencode(query)
         env['QUERY_STRING'] = qs
+        t = None
+        if dotiming:
+            t1 = time.clock()
         if profiler is not None:
             profiler.enable()
         result = self.handler(env, start_response_mock)
         if profiler is not None:
             profiler.disable()
+        if dotiming:
+            t2 = time.clock()
+            t = (t2-t1)*1000
         wms_utils.owslib.wms.openURL = openURL
         if saveimg:
             open('tmp/png_%s_%s.png' % (layer, srs), 'wb').write(result[0])
@@ -139,7 +147,7 @@ class WMSResponse(object):
                 raise SystemExit(msg)
             else:
                 print('Image data seems OK')
-        return result
+        return result, t
 
     def request_images(self, url, layer, check_blank=False):
         """
@@ -166,9 +174,10 @@ class WMSResponse(object):
 class TestWMSResponse(object):
     def setUp(self):
         #self.handler = Handler('data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc')
+        """
         datapaths= ['data/NOAA/GFS/NOAA_GFS_VISIBILITY.nc',
-                    'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc',
-                    'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_MEDSEA.nc',
+                    'data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc',
+                    'data/NOAA/HYCOM/NOAA_HYCOM_MEDSEA.nc',
                     'data/FCOO/GETM/metoc.dk.2Dvars.1nm.2D.1h.NS1C-v001C.nc',
                     'data/FCOO/GETM/metoc.dk.velocities.1nm.surface.1h.NS1C-v001C.nc',
                     'data/FCOO/GETM/metoc.full_dom.2Dvars.3nm.2D.1h.NS1C-v001C.nc',
@@ -178,7 +187,24 @@ class TestWMSResponse(object):
                     'data/FCOO/WW3/ww3fcast_sigwave_grd_DKinner_v001C.nc',
                     'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc',
                     'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
-                    'data/DMI/HIRLAM/metoc.DMI_HIRLAM-S03_NSBALTIC_3NM_v004C.nc']
+                    'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
+        """
+        datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_EAST_AFRICA.nc',
+                    'data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc',
+                    'data/NOAA/HYCOM/NOAA_HYCOM_MEDSEA.nc',
+                    'data/FCOO/GETM/idk.2Dvars.600m.2D.1h.DK600-v004C.nc',
+                    'data/FCOO/GETM/idk.salt-temp.600m.surface.1h.DK600-v004C.nc',
+                    'data/FCOO/GETM/idk.velocities.600m.surface.1h.DK600-v004C.nc',
+                    'data/FCOO/GETM/nsbalt.2Dvars.1nm.2D.1h.DK1NM-v002C.nc',
+                    'data/FCOO/GETM/nsbalt.salt-temp.1nm.surface.1h.DK1NM-v002C.nc',
+                    'data/FCOO/GETM/nsbalt.velocities.1nm.surface.1h.DK1NM-v002C.nc',
+                    'data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
+                    'data/ECMWF/DXD/ECMWF_DXD_GREENLAND.nc',
+                    'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc',
+                    'data/ECMWF/DXP/ECMWF_DXP_GREENLAND.nc',
+                    'data/DMI/HIRLAM/DMI_HIRLAM_K05.nc',
+                    'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
+                    'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
         self.responses = [WMSResponse(datapath) for datapath in datapaths]
         #self.responses = self.responses[:4]
 
@@ -211,20 +237,20 @@ def make_requests(n=1, wmslist=None, layerlist=None, srslist=None, dotiming=Fals
                 try:
                     srs_list = wms.get_srs(layer=flayer)
                 except:
-                    print('Could not find %s in this WMS' % layer)
+                    #print('Could not find %s in this WMS' % layer)
                     continue
             else:
                 srs_list = srslist[:]
             for srs in srs_list:
-                if dotiming:
-                    t1 = time.clock()
+                t = 0.0
                 for i in range(n):
-                    result = wms.request(layer=layer, srs=srs, 
+                    result, tone = wms.request(layer=layer, srs=srs, dotiming=dotiming,
                              checkimg=checkimg, saveimg=saveimg,
                              profiler=pr)
+                    if dotiming:
+                        t += tone
                 if dotiming:
-                    t2 = time.clock()
-                    t = (t2-t1)/float(n)*1000
+                    t /= float(n)
                     print('    Time for layer=%s, srs=%s per plot: %i milliseconds' \
                           % (layer, srs, t))
                     t_sum += t
@@ -241,16 +267,43 @@ if __name__ == '__main__':
     #make_requests(n=3, dotiming=True)
     #make_requests(n=3, doprofiling=True)
     #make_requests(n=1, doprofiling=False)
-    make_requests(n=1, checkimg=True, saveimg=True)
+    #make_requests(n=3, checkimg=True, saveimg=True)
     # Check vector plots
-    #datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_GREENLAND.nc',
-    #            'data/NOAA/HYCOM/NOAA_HYCOM_GLOBAL_MEDSEA.nc',
-    #            'data/FCOO/GETM/metoc.dk.velocities.1nm.surface.1h.NS1C-v001C.nc',
-    #            'data/FCOO/GETM/metoc.full_dom.velocities.surface.3nm.1h.NS1C-v001C.nc',
-    #            'data/FCOO/GETM/metoc.idk.velocities.600m.surface.1h.DK600-v001C.nc',
-    #            'data/FCOO/WW3/ww3fcast_sigwave_grd_DKinner_v001C.nc',
-    #            'data/FCOO/WW3/ww3fcast_sigwave_grd_NSBaltic_v001C.nc',
-    #            'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
-    #            'data/DMI/HIRLAM/metoc.DMI_HIRLAM-S03_NSBALTIC_3NM_v004C.nc']
-    #layers = ['u10:v10', 'u_velocity:v_velocity', 'uu:vv']
-    #make_requests(n=10, wmslist=datapaths, layerlist=layers, doprofiling=True, saveimg=False)
+    datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_EAST_AFRICA.nc',
+                'data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc',
+                'data/NOAA/HYCOM/NOAA_HYCOM_MEDSEA.nc',
+                'data/FCOO/GETM/idk.2Dvars.600m.2D.1h.DK600-v004C.nc',
+                'data/FCOO/GETM/idk.salt-temp.600m.surface.1h.DK600-v004C.nc',
+                'data/FCOO/GETM/idk.velocities.600m.surface.1h.DK600-v004C.nc',
+                'data/FCOO/GETM/nsbalt.2Dvars.1nm.2D.1h.DK1NM-v002C.nc',
+                'data/FCOO/GETM/nsbalt.salt-temp.1nm.surface.1h.DK1NM-v002C.nc',
+                'data/FCOO/GETM/nsbalt.velocities.1nm.surface.1h.DK1NM-v002C.nc',
+                'data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
+                'data/ECMWF/DXD/ECMWF_DXD_GREENLAND.nc',
+                'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc',
+                'data/ECMWF/DXP/ECMWF_DXP_GREENLAND.nc',
+                'data/DMI/HIRLAM/DMI_HIRLAM_K05.nc',
+                'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
+                'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
+    layers = ['u10:v10', 'u_velocity:v_velocity', 'uu:vv', 'u:v', 'U10M:V10M']
+    datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_EAST_AFRICA.nc',
+                'data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc',
+                'data/NOAA/HYCOM/NOAA_HYCOM_MEDSEA.nc',
+                'data/FCOO/GETM/idk.2Dvars.600m.2D.1h.DK600-v004C.nc',
+                'data/FCOO/GETM/idk.salt-temp.600m.surface.1h.DK600-v004C.nc',
+                'data/FCOO/GETM/idk.velocities.600m.surface.1h.DK600-v004C.nc',
+                'data/FCOO/GETM/nsbalt.2Dvars.1nm.2D.1h.DK1NM-v002C.nc',
+                'data/FCOO/GETM/nsbalt.salt-temp.1nm.surface.1h.DK1NM-v002C.nc',
+                'data/FCOO/GETM/nsbalt.velocities.1nm.surface.1h.DK1NM-v002C.nc',
+                'data/DMI/HIRLAM/DMI_HIRLAM_K05.nc',
+                'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
+                'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
+    #datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc']
+    #datapaths= ['data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
+    #            'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc']
+    #datapaths= ['data/FCOO/GETM/idk.velocities.600m.surface.1h.DK600-v004C.nc']
+    layers = ['u10_v10', 'u_velocity_v_velocity', 'uu_vv', 'u_v', 'U10M_V10M']
+    #make_requests(n=10, wmslist=datapaths, layerlist=layers, doprofiling=False, saveimg=False)
+    #make_requests(n=4, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=False, saveimg=False)
+    #make_requests(n=2, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=True, saveimg=False)
+    make_requests(n=10, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=True, saveimg=False)
