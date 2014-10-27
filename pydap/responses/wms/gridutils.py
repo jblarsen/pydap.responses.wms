@@ -196,8 +196,9 @@ def time_slice(time, grid, dataset):
                     instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
                     instant = netcdftime.date2num(instant, dim.units, calendar)
                     # TODO: Calculate index directly
-                    values = values - values[0]
-                    instant = instant - values[0]
+                    epoch = values[0]
+                    values = values - epoch
+                    instant = instant - epoch
                     l = np.isclose(values, instant)
                     #l[values == instant] = True
     else:
