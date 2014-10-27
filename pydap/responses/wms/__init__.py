@@ -18,6 +18,8 @@ from matplotlib.cm import get_cmap
 from matplotlib.colors import Normalize
 from matplotlib import rcParams
 from matplotlib.colors import from_levels_and_colors
+from matplotlib.ticker import FormatStrFormatter
+
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
 import pyproj
@@ -125,10 +127,6 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def __call__(self, environ, start_response):
-        # Create a Beaker cache dependent on the query string, since
-        # most (all?) pre-computed values will depend on the specific
-        # dataset. We strip all WMS related arguments since they don't
-        # affect the dataset.
         query = parse_dict_querystring_lower(environ)
 
         # Init colors class instance on first invokation
@@ -143,10 +141,20 @@ class WMSResponse(BaseResponse):
             location = construct_url(environ,
                     with_query_string=True,
                     querystring=dap_query)
+            # Create a Beaker cache dependent on the query string for
+            # pre-computed values that depend on the specific dataset
+            # We exclude all WMS related arguments since they don't
+            # affect the dataset.
             self.cache = environ['beaker.cache'].get_cache(
                     'pydap.responses.wms+' + location)
+            # We also create a global cache for pre-computed values
+            # that can be shared across datasets
+            self.global_cache = environ['beaker.cache'].get_cache(
+                    'pydap.responses.wms+global')
+            #print self.cache.namespace.keys()
         except KeyError:
             self.cache = None
+            self.global_cache = None
 
         # Enable cross-origin resource sharing (CORS)
         self.headers.append( ('Access-Control-Allow-Origin', '*') )
@@ -223,11 +231,13 @@ class WMSResponse(BaseResponse):
             cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
 
             # Check for cached version of colorbar
-            try:
-                output = self.cache.get_value(('colorbar', cmapname))
-                return [output]
-            except KeyError:
-                pass
+            if self.global_cache:
+                try:
+                    output = self.global_cache.get_value(('colorbar', cmapname))
+                    if hasattr(dataset, 'close'): dataset.close()
+                    return [output]
+                except KeyError:
+                    pass
 
             # Get more query string parameters
             orientation = query.get('styles', 'vertical')
@@ -258,8 +268,9 @@ class WMSResponse(BaseResponse):
 
             if hasattr(dataset, 'close'): dataset.close()
             output = output.getvalue()
-            if self.cache:
-                self.cache.set_value(('colorbar', cmapname), output)
+            if self.global_cache:
+                key = ('colorbar', cmapname)
+                self.global_cache.set_value(key, output)
 
             return [output]
 
@@ -288,7 +299,8 @@ class WMSResponse(BaseResponse):
                 data = gridutils.fix_data(np.asarray(grid.array[:]), grid.attributes)
                 actual_range = np.min(data), np.max(data)
             if self.cache:
-                self.cache.set_value((grid.id, 'actual_range'), actual_range)
+                key = (grid.id, 'actual_range')
+                self.cache.set_value(key, actual_range)
         return actual_range
 
     #@profile
@@ -323,10 +335,18 @@ class WMSResponse(BaseResponse):
                 vector_method = style_elems[0]
                 if len(style_elems) > 1:
                     vector_color = style_elems[1]
+            nthin_fill = map(int, 
+                environ.get('pydap.responses.wms.fill_thinning', "12,12") \
+                .split(','))
+            nthin_vector = map(int, 
+                environ.get('pydap.responses.wms.vector_thinning', "54,36") \
+                .split(','))
             return query, dpi, fill_method, vector_method, vector_color, time, \
-                   figsize, bbox, cmapname, srs, styles, w, h
+                   figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
+                   nthin_vector
         query, dpi, fill_method, vector_method, vector_color, time, figsize, \
-            bbox, cmapname, srs, styles, w, h = prep_map(environ)
+            bbox, cmapname, srs, styles, w, h, nthin_fill, nthin_vector = \
+            prep_map(environ)
 
         #@profile
         def serialize(dataset):
@@ -334,13 +354,16 @@ class WMSResponse(BaseResponse):
             # It is apparently expensive to add an axes in matplotlib - so we cache the
             # axes (it is pickled so it is a threadsafe copy)
             try:
-                fig = cPickle.loads(self.cache.get_value((figsize, 'figure')))
+                if not self.global_cache:
+                    raise KeyError
+                fig = cPickle.loads(self.global_cache.get_value((figsize, 'figure')))
                 ax = fig.get_axes()[0]
             except KeyError:
                 fig = Figure(figsize=figsize, dpi=dpi)
                 ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
-                if self.cache:
-                    self.cache.set_value((figsize, 'figure'), cPickle.dumps(fig))
+                if self.global_cache:
+                    key = (figsize, 'figure')
+                    self.global_cache.set_value(key, cPickle.dumps(fig))
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
             if asbool(query.get('transparent', 'true')):
@@ -365,7 +388,7 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         self._plot_grid(dataset, grid, time, bbox_local, (w, h), ax,
-                                        srs, fill_method, cmapname)
+                                        srs, fill_method, nthin_fill, cmapname)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -381,8 +404,9 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         grids.append(grid)
-                    self._plot_vector_grids(dataset, grids, time, bbox_local, (w, h),
-                                            ax, srs, vector_method, vector_color)
+                    self._plot_vector_grids(dataset, grids, time, bbox_local, 
+                        (w, h), ax, srs, vector_method, vector_color, 
+                        nthin_vector)
 
             # Save to buffer.
             if bbox is not None:
@@ -414,20 +438,31 @@ class WMSResponse(BaseResponse):
         do_proj = srs != base_srs
         if do_proj:
             try:
-                p_base = self.cache.get_value((base_srs, 'pyproj'))
+                if not self.global_cache:
+                    raise KeyError
+                p_base = self.global_cache.get_value((base_srs, 'pyproj'))
             except KeyError:
                 p_base = pyproj.Proj(init=base_srs)
-                if self.cache:
-                    self.cache.set_value((base_srs, 'pyproj'), p_base)
+                if self.global_cache:
+                    key = (base_srs, 'pyproj')
+                    self.global_cache.set_value(key, p_base)
             try:
-                p_query = self.cache.get_value((srs, 'pyproj'))
+                if not self.global_cache:
+                    raise KeyError
+                p_query = self.global_cache.get_value((srs, 'pyproj'))
             except KeyError:
                 p_query = pyproj.Proj(init=srs)
-                if self.cache:
-                    self.cache.set_value((srs, 'pyproj'), p_query)
+                if self.global_cache:
+                    key = (srs, 'pyproj')
+                    self.global_cache.set_value(key, p_query)
+        else:
+            p_base = None
+            p_query = None
 
         # This operation is expensive - cache results using beaker
         try:
+            if not self.cache:
+                raise KeyError
             lon_str, lat_str, dlon, do_proj = self.cache.get_value(
                   (grid.id, srs, 'project_data'))
             lon = np.load(StringIO(lon_str))
@@ -455,7 +490,8 @@ class WMSResponse(BaseResponse):
                     np.save(lon_str, lon)
                     lat_str = StringIO()
                     np.save(lat_str, lat)
-                    self.cache.set_value((grid.id, srs, 'project_data'), 
+                    key = (grid.id, srs, 'project_data')
+                    self.cache.set_value(key,
                          (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
 
         return lon, lat, dlon, cyclic, do_proj, p_base, p_query
@@ -501,10 +537,10 @@ class WMSResponse(BaseResponse):
             ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
             if not xcond.any() or not ycond.any():
                 return
-            i0r = max(np.min(I[xcond])-2, 0)
-            i1r = min(np.max(I[xcond])+3, xcond.shape[0])
-            j0r = max(np.min(J[ycond])-2, 0)
-            j1r = min(np.max(J[ycond])+3, ycond.shape[0])
+            i0r = max(np.min(I[xcond])-1, 0)
+            i1r = min(np.max(I[xcond])+2, xcond.shape[0])
+            j0r = max(np.min(J[ycond])-1, 0)
+            j1r = min(np.max(J[ycond])+2, ycond.shape[0])
             # Convert reduced indices to global indices
             i0 = istep*i0r
             i1 = istep*i1r
@@ -547,10 +583,10 @@ class WMSResponse(BaseResponse):
             ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
             if not xcond.any() or not ycond.any():
                 raise OutsideGridException
-            i0r = max(np.min(I[xcond])-2, 0)
-            i1r = min(np.max(I[xcond])+3, xcond.shape[1])
-            j0r = max(np.min(J[ycond])-2, 0)
-            j1r = min(np.max(J[ycond])+3, ycond.shape[0])
+            i0r = max(np.min(I[xcond])-1, 0)
+            i1r = min(np.max(I[xcond])+2, xcond.shape[1])
+            j0r = max(np.min(J[ycond])-1, 0)
+            j1r = min(np.max(J[ycond])+2, ycond.shape[0])
             # Convert reduced indices to global indices
             i0 = istep*i0r
             i1 = istep*i1r
@@ -559,6 +595,7 @@ class WMSResponse(BaseResponse):
 
         return (j0, j1, jstep), (i0, i1, istep)
 
+    #@profile
     def _extract_data(self, l, (j0, j1, jstep), (i0, i1, istep), 
                       lat, lon, dlon, cyclic, grids):
         """Returns coordinate and data arrays given slicing information."""
@@ -567,10 +604,10 @@ class WMSResponse(BaseResponse):
         if len(lon.shape) == 1:
             X = lon[i0:i1:istep]
             Y = lat[j0:j1:jstep]
-            X, Y = np.meshgrid(X, Y)
             # Fix cyclic data.
             if cyclic:
                 X = np.ma.concatenate((X, X[0:1] + dlon), 0)
+            X, Y = np.meshgrid(X, Y)
         else:
             X = lon[j0:j1:jstep,i0:i1:istep]
             Y = lat[j0:j1:jstep,i0:i1:istep]
@@ -597,18 +634,21 @@ class WMSResponse(BaseResponse):
             """
         data = []
         for grid in grids:
-            gdata = grid.array[l,j0:j1:jstep,i0:i1:istep]
+            # The line below is a performance bottleneck.
+            gdata = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep])
             if cyclic:
                 gdata = np.ma.concatenate((
-                    gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])[0]), -1)
+                    gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])), -1)
             data.append(gdata)
 
+        # Postcondition
+        assert X.shape == Y.shape, 'shapes: %s %s' % (X.shape, Y.shape)
 
         return X, Y, data
 
     #@profile
     def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs,
-                           vector_method, vector_color):
+                           vector_method, vector_color, nthin=(54, 36)):
         try:
             # Slice according to time request (WMS-T).
             l = gridutils.time_slice(time, grids[0], dataset)
@@ -621,9 +661,6 @@ class WMSResponse(BaseResponse):
                 self._prepare_grid(srs, bbox, grids[0], dataset)
 
         # Now we plot the data window until the end of the bbox:
-        nthin_lon = 36 # Make one vector for every nthin pixels
-        nthin_lat = 54 # Make one vector for every nthin pixels
-        nthin = (nthin_lat, nthin_lon)
         while np.min(lon) < bbox[2]:
             lon_save = lon[:]
             lat_save = lat[:]
@@ -678,7 +715,8 @@ class WMSResponse(BaseResponse):
 
 
     #@profile
-    def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method, cmapname='jet'):
+    def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method,
+                   nthin=(5, 5), cmapname='jet'):
         # We currently only support contour and contourf
         assert fill_method in ['contour', 'contourf']
 
@@ -694,9 +732,6 @@ class WMSResponse(BaseResponse):
                   self._prepare_grid(srs, bbox, grid, dataset)
 
         # Now we plot the data window until the end of the bbox:
-        nthin_lon = 5 # Extract a maximum of every nthin_lon pixel in lon dir
-        nthin_lat = 5 # Extract a maximum of every nthin_lat pixel in lat dir
-        nthin = (nthin_lat, nthin_lon)
         while np.min(lon) < bbox[2]:
             lon_save = lon[:]
             lat_save = lat[:]
@@ -716,9 +751,7 @@ class WMSResponse(BaseResponse):
             if data.shape: 
                 # apply time slices
                 if l is not None:
-                    print l, data.shape, type(data)
                     data = np.asarray(data)
-                    print l, data.shape, type(data)
                 else:
                     # FIXME: Do the indexing here if we decide to go for just the first timestep
                     if len(data.shape) > 2:
@@ -753,7 +786,6 @@ class WMSResponse(BaseResponse):
                             newlevels = np.insert(newlevels, 0, np.finfo(dtype).min)
                         if cmap.colorbar_extend in ['max', 'both']:
                             newlevels = np.append(newlevels, np.finfo(dtype).max)
-                        print data.shape
                         plot_method(X, Y, data, norm=norm, cmap=cmap, 
                                     levels=newlevels, antialiased=False)
                         #newlevels = plotutils.modify_contour_levels(levels, cmap.colorbar_extend)
@@ -763,8 +795,10 @@ class WMSResponse(BaseResponse):
                     elif fill_method == 'contour':
                         newlevels = plotutils.modify_contour_levels(levels, 
                                     cmap.colorbar_extend)
+                        fltfmt = FormatStrFormatter('%d')
                         cs = plot_method(X, Y, data, colors='black', levels=newlevels, 
                                     antialiased=False)
+                        cs.levels = [fltfmt(val) for val in cs.levels]
                         ax.clabel(cs, inline=1, fontsize=10)
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
@@ -779,9 +813,11 @@ class WMSResponse(BaseResponse):
             for header in environ['pydap.headers']:
                 if 'Last-modified' in header:
                     last_modified = header[1]
-            if last_modified is not None:
+            if last_modified is not None and self.cache:
                 try:
-                    output = self.cache.get_value(('capabilities', last_modified))
+                    key = ('capabilities', last_modified)
+                    output = self.cache.get_value(key)[:]
+                    if hasattr(dataset, 'close'): dataset.close()
                     return [output]
                 except KeyError:
                     pass
@@ -802,7 +838,8 @@ class WMSResponse(BaseResponse):
                         lon_range[0] = min(lon_range[0], np.min(lon))
                         lon_range[1] = max(lon_range[1], np.max(lon))
                 if self.cache:
-                    self.cache.set_value('lon_range', lon_range)
+                    key = 'lon_range'
+                    self.cache.set_value(key, lon_range)
             try:
                 lat_range = self.cache.get_value('lat_range')
             except (KeyError, AttributeError):
@@ -815,7 +852,8 @@ class WMSResponse(BaseResponse):
                         lat_range[0] = min(lat_range[0], np.min(lat))
                         lat_range[1] = max(lat_range[1], np.max(lat))
                 if self.cache:
-                    self.cache.set_value('lat_range', lat_range)
+                    key = 'lat_range'
+                    self.cache.set_value(key, lat_range)
 
             # Remove ``REQUEST=GetCapabilites`` from query string.
             location = construct_url(environ, with_query_string=True)
@@ -844,7 +882,8 @@ class WMSResponse(BaseResponse):
             if hasattr(dataset, 'close'): dataset.close()
             output = output.encode('utf-8')
             if last_modified is not None and self.cache:
-                self.cache.set_value(('capabilities', last_modified), output)
+                key = ('capabilities', last_modified)
+                self.cache.set_value(key, output[:], expiretime=86400)
             return [output]
         return serialize
 

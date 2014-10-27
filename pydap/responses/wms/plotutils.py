@@ -89,6 +89,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         canvas.print_png(output)
     return output
 
+#@profile
 def convert_paletted(canvas, ncolors=None, verbose=False):
     """\
     Convert matplotlib canvas to paletted PNG if there are less

@@ -195,7 +195,8 @@ def time_slice(time, grid, dataset):
                 else:
                     instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
                     instant = netcdftime.date2num(instant, dim.units, calendar)
-                    l = np.isclose(values, instant)
+                    # TODO: Calculate index directly
+                    l = np.isclose(values, instant, rtol=1e-10)
                     #l[values == instant] = True
     else:
         l = Ellipsis
