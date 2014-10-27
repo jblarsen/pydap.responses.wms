@@ -159,6 +159,9 @@ class WMSResponse(BaseResponse):
         # Enable cross-origin resource sharing (CORS)
         self.headers.append( ('Access-Control-Allow-Origin', '*') )
 
+        # Support cross-origin resource sharing (CORS)
+        self.headers.append( ('Access-Control-Allow-Origin', '*') )
+
         # Handle GetMap and GetCapabilities requests
         type_ = query.get('request', 'GetMap')
         if type_ == 'GetCapabilities':
