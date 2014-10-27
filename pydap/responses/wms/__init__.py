@@ -156,9 +156,6 @@ class WMSResponse(BaseResponse):
             self.cache = None
             self.global_cache = None
 
-        # Enable cross-origin resource sharing (CORS)
-        self.headers.append( ('Access-Control-Allow-Origin', '*') )
-
         # Support cross-origin resource sharing (CORS)
         self.headers.append( ('Access-Control-Allow-Origin', '*') )
 
