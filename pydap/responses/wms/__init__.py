@@ -537,15 +537,15 @@ class WMSResponse(BaseResponse):
             ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
             if not xcond.any() or not ycond.any():
                 return
-            i0r = max(np.min(I[xcond])-1, 0)
-            i1r = min(np.max(I[xcond])+2, xcond.shape[0])
-            j0r = max(np.min(J[ycond])-1, 0)
-            j1r = min(np.max(J[ycond])+2, ycond.shape[0])
+            i0r = np.min(I[xcond])-1
+            i1r = np.max(I[xcond])+2
+            j0r = np.min(J[ycond])-1
+            j1r = np.max(J[ycond])+2
             # Convert reduced indices to global indices
-            i0 = istep*i0r
-            i1 = istep*i1r
-            j0 = jstep*j0r
-            j1 = jstep*j1r
+            i0 = max(istep*i0r, 0)
+            i1 = min(istep*i1r, lon.shape[0]+1)
+            j0 = max(jstep*j0r, 0)
+            j1 = min(jstep*j1r, lat.shape[0]+1)
             #i0, i1 = gridutils.find_containing_bounds(lon, bbox[0], bbox[2])
             #j0, j1 = gridutils.find_containing_bounds(lat, bbox[1], bbox[3])
 
@@ -583,15 +583,15 @@ class WMSResponse(BaseResponse):
             ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
             if not xcond.any() or not ycond.any():
                 raise OutsideGridException
-            i0r = max(np.min(I[xcond])-1, 0)
-            i1r = min(np.max(I[xcond])+2, xcond.shape[1])
-            j0r = max(np.min(J[ycond])-1, 0)
-            j1r = min(np.max(J[ycond])+2, ycond.shape[0])
+            i0r = np.min(I[xcond])-1
+            i1r = np.max(I[xcond])+2
+            j0r = np.min(J[ycond])-1
+            j1r = np.max(J[ycond])+2
             # Convert reduced indices to global indices
-            i0 = istep*i0r
-            i1 = istep*i1r
-            j0 = jstep*j0r
-            j1 = jstep*j1r
+            i0 = max(istep*i0r, 0)
+            i1 = min(istep*i1r, lon.shape[1]+1)
+            j0 = max(jstep*j0r, 0)
+            j1 = min(jstep*j1r, lon.shape[0]+1)
 
         return (j0, j1, jstep), (i0, i1, istep)
 
@@ -600,7 +600,7 @@ class WMSResponse(BaseResponse):
                       lat, lon, dlon, cyclic, grids):
         """Returns coordinate and data arrays given slicing information."""
         # TODO: Currently we just select the first lon value for cyclic
-        # wrapping. It should be "equally spaced".
+        # wrapping for the 1d lat/lon case. It should be "equally spaced".
         if len(lon.shape) == 1:
             X = lon[i0:i1:istep]
             Y = lat[j0:j1:jstep]
@@ -612,33 +612,35 @@ class WMSResponse(BaseResponse):
             X = lon[j0:j1:jstep,i0:i1:istep]
             Y = lat[j0:j1:jstep,i0:i1:istep]
             # Fix cyclic data.
-            """
             if cyclic:
                 if i0 < 0:
-                    X = np.concatenate((X[:,i0:]-dlon, X), axis=1)
-                    Y = np.concatenate((Y[:,i0:], Y), axis=1)
-                    ii = xcond.shape[1] + i0
-                    data = np.ma.concatenate((grid.array[...,ii:], 
-                                              grid.array[...]), axis=-1)
-                if i1 > xcond.shape[1]:
-                    di = i1 - xcond.shape[1]
-                    X = np.concatenate((X, X[:,:di]+dlon), axis=1)
-                    Y = np.concatenate((Y, Y[:,:di]), axis=1)
-                    if lower:
-                        data = np.ma.concatenate((data[...], 
-                                                  data[...,:di]), axis=-1)
-                    else:
-                        data = np.ma.concatenate((grid.array[...], 
-                                                  grid.array[...,:di]), axis=-1)
-                        lower = True
-            """
+                    # The leftmost bound is to the left of the grid origin
+                    X = np.concatenate((X[:,i0:-1:istep]-dlon, X), axis=1)
+                    Y = np.concatenate((Y[:,i0:-1:istep], Y), axis=1)
+                if i1 > lon.shape[1]:
+                    # The rightmost bound is to the right of the grid extent
+                    di = i1 - lon.shape[1]
+                    X = np.concatenate((X, X[:,0:di:istep]+dlon), axis=1)
+                    Y = np.concatenate((Y, Y[:,0:di:istep]), axis=1)
         data = []
         for grid in grids:
             # The line below is a performance bottleneck.
             gdata = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep])
             if cyclic:
-                gdata = np.ma.concatenate((
-                    gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])), -1)
+                if len(lon.shape) == 1:
+                    gdata = np.ma.concatenate((
+                        gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])), -1)
+                else:
+                    if i0 < 0:
+                        # The leftmost bound is to the left of the grid origin
+                        ii = lon.shape[1] + i0
+                        gdata = np.ma.concatenate((grid.array[l,j0:j1:jstep,ii:-1:istep], 
+                                                   gdata), axis=-1)
+                    if i1 > lon.shape[1]:
+                        # The rightmost bound is to the right of the grid extent
+                        di = i1 - lon.shape[1]
+                        gdata = np.ma.concatenate((gdata,
+                                                   grid.array[l,j0:j1:jstep,0:di:istep]), axis=-1)
             data.append(gdata)
 
         # Postcondition
