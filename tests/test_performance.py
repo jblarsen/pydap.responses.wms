@@ -285,7 +285,8 @@ if __name__ == '__main__':
                 'data/DMI/HIRLAM/DMI_HIRLAM_K05.nc',
                 'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
                 'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
-    layers = ['u10:v10', 'u_velocity:v_velocity', 'uu:vv', 'u:v', 'U10M:V10M']
+    #layers = ['u10:v10', 'u_velocity:v_velocity', 'uu:vv', 'u:v', 'U10M:V10M']
+    """
     datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_EAST_AFRICA.nc',
                 'data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc',
                 'data/NOAA/HYCOM/NOAA_HYCOM_MEDSEA.nc',
@@ -298,12 +299,13 @@ if __name__ == '__main__':
                 'data/DMI/HIRLAM/DMI_HIRLAM_K05.nc',
                 'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
                 'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
+    """
     #datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc']
-    #datapaths= ['data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
-    #            'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc']
+    datapaths= ['data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
+                'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc']
     #datapaths= ['data/FCOO/GETM/idk.velocities.600m.surface.1h.DK600-v004C.nc']
     layers = ['u10_v10', 'u_velocity_v_velocity', 'uu_vv', 'u_v', 'U10M_V10M']
     #make_requests(n=10, wmslist=datapaths, layerlist=layers, doprofiling=False, saveimg=False)
     #make_requests(n=4, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=False, saveimg=False)
     #make_requests(n=2, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=True, saveimg=False)
-    make_requests(n=10, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=True, saveimg=False)
+    make_requests(n=10, wmslist=datapaths, layerlist=layers, dotiming=True, doprofiling=False, saveimg=False)
