@@ -1,5 +1,5 @@
 from __future__ import division
-
+import ctypes
 from cStringIO import StringIO
 
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -17,6 +17,21 @@ try:
     from PIL import Image
 except:
     PIL = None
+try:
+    from wand.image import Image as WandImage
+    from wand.api import library
+    # Register C-type arguments
+    library.MagickQuantizeImage.argtypes = [ctypes.c_void_p,
+                                            ctypes.c_size_t,
+                                            ctypes.c_int,
+                                            ctypes.c_size_t,
+                                            ctypes.c_int,
+                                            ctypes.c_int]
+    library.MagickQuantizeImage.restype = None
+    library.MagickGetImageColors.argtypes = [ctypes.c_void_p]
+    library.MagickGetImageColors.restype = ctypes.c_size_t
+except:
+    wand = None
 
 def make_colorbar(width, height, dpi, grid, orientation, transparent, norm, 
                   cmap, extend, paletted):
@@ -90,7 +105,72 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
     return output
 
 #@profile
-def convert_paletted(canvas, ncolors=None, verbose=False):
+def convert_paletted(canvas, ncolors=None, backend='PIL', verbose=False):
+    """\
+    Convert matplotlib canvas to paletted PNG if there are less
+    than 256 colors (if ncolors is not None paletting is always 
+    employed. Pixels are considered transparent if the
+    alpha channel value is <= 128 and opaque otherwise. 
+
+    Returns a memory file (StringIO object) containing the PNG
+    image.
+    """
+    if backend == 'wand':
+        outbuffer = convert_paletted_wand(canvas, ncolors, verbose)
+    elif backend == 'PIL':
+        outbuffer = convert_paletted_pil(canvas, ncolors, verbose)
+    else:
+        raise ValueError('Invalid PNG conversion backend specified')
+    return outbuffer
+
+#@profile
+def DoColorReduction(img, color_count):
+    """Reduce image color count"""
+    assert isinstance(img, WandImage)
+    assert isinstance(color_count, int)
+    colorspace = 1 # assuming RGB?
+    treedepth = 0 # Autodetect
+    dither = 0 # False
+    merror = 0 # False
+    # NOTE: It is slow to get the number of colors from the image
+    ncolors = library.MagickGetImageColors(img.wand)
+    library.MagickQuantizeImage(img.wand, color_count, colorspace,
+                                         treedepth, dither, merror)
+
+#@profile
+def convert_paletted_wand(canvas, ncolors=None, verbose=False):
+    """
+    ImageMagick based conversion to paletted PNG.
+    """
+    outbuffer = StringIO() 
+   
+    # Read image
+    inbuffer = StringIO()
+    # TODO: If and when wand supports reading raw RGBA we can
+    # use the much faster canvas.print_to_buffer() method
+    canvas.print_png(inbuffer)
+    inbuffer.seek(0)
+    with WandImage(file=inbuffer) as im:
+        # TODO: Maybe take number of colors from mpl.norm instance
+        # to reduce overhead from getting colors from image (30 ms
+        # for typical 512x512 image).
+        # Find number of colors
+        if ncolors is None:
+            ncolors = len(im.histogram)
+        if verbose:
+            print(ncolors)
+            print(im.histogram)
+
+        # Only convert if the number of colors is less than 256
+        if ncolors < 256:
+            DoColorReduction(im, ncolors)
+            im.save(file=outbuffer)
+        else:
+            canvas.print_png(outbuffer)
+    return outbuffer
+
+#@profile
+def convert_paletted_pil(canvas, ncolors=None, verbose=False):
     """\
     Convert matplotlib canvas to paletted PNG if there are less
     than 256 colors (if ncolors is not None paletting is always 
