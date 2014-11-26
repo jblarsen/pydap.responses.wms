@@ -112,7 +112,8 @@ def project_data(p_source, p_target, bbox, lon, lat, cyclic):
     assumed to be in EPSG:4326.
 
     Arguments:
-    srs -- Projection EPSG string
+    p_source -- Source pyproj.Proj instance
+    p_target -- Source pyproj.Proj instance
     bbox -- input bounding box - used for normalizing output
     lon -- input longitude coordinates
     lat -- input latitude coordinates
@@ -124,6 +125,11 @@ def project_data(p_source, p_target, bbox, lon, lat, cyclic):
     dx -- delta for going around globe once in projection coordinates
     do_proj -- boolean true if output projection differs from EPSG:4326 
     """
+    # Preconditions
+    assert isinstance(p_source, pyproj.Proj)
+    assert isinstance(p_target, pyproj.Proj)
+
+    # Perform projection
     do_proj = p_source != p_target
     if do_proj:
         if len(lon.shape) == 1:
