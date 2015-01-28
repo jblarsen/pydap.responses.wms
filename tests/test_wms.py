@@ -18,7 +18,7 @@ import unittest
 from pydap.handlers.netcdf import Handler
 import pyproj
 
-# Internal imports
+# Internal imports (present working directory)
 import wms_utils
 
 # Special cache setup
