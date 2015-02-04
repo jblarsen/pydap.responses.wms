@@ -8,6 +8,7 @@ from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 from matplotlib.colors import BoundaryNorm
 from matplotlib import rcParams
+from matplotlib.ticker import NullLocator
 
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
@@ -34,15 +35,28 @@ except:
     wand = None
 
 def make_colorbar(width, height, dpi, grid, orientation, transparent, norm, 
-                  cmap, extend, paletted):
+                  cmap, extend, paletted, add_label, add_ticks):
     figsize = width/dpi, height/dpi
-    fig = Figure(figsize=figsize, dpi=dpi)
+    fig = Figure(figsize=figsize, dpi=dpi, frameon=False)
+
     fig.set_facecolor('white')
     fig.set_edgecolor('none')
-    if orientation == 'vertical':
-        ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
+    if add_label:
+        if orientation == 'vertical':
+            ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
+        else:
+            ax = fig.add_axes([0.05, 0.55, 0.90, 0.40])
     else:
-        ax = fig.add_axes([0.05, 0.55, 0.90, 0.40])
+        if orientation == 'vertical':
+            if add_ticks:
+                ax = fig.add_axes([0.05, 0.05, 0.60, 0.90])
+            else:
+                ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+        else:
+            if add_ticks:
+                ax = fig.add_axes([0.05, 0.30, 0.90, 0.65])
+            else:
+                ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
     if transparent:
         fig.figurePatch.set_alpha(0.0)
         ax.axesPatch.set_alpha(0.5)
@@ -54,29 +68,35 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
     cb.patch.set_antialiased(False)
     cb.outline.set_antialiased(False)
 
-    #    ticks.set_antialiased(False)
-    if orientation == 'vertical':
-        for tick in cb.ax.get_yticklabels():
-            txt = tick.get_text()
-            ntxt = len(txt)
-            fontsize = max(int(0.50*width/ntxt), fontsize)
-            fontsize = min(14, fontsize)
-        for tick in cb.ax.get_yticklabels():
-            tick.set_fontsize(fontsize)
-            tick.set_color('black')
+    if add_ticks:
+        #    ticks.set_antialiased(False)
+        if orientation == 'vertical':
+            for tick in cb.ax.get_yticklabels():
+                txt = tick.get_text()
+                ntxt = len(txt)
+                fontsize = max(int(0.50*width/ntxt), fontsize)
+                fontsize = min(14, fontsize)
+            for tick in cb.ax.get_yticklabels():
+                tick.set_fontsize(fontsize)
+                tick.set_color('black')
+        else:
+            ticks = cb.ax.get_xticklabels()
+            for tick in ticks:
+                txt = tick.get_text()
+                ntxt = len(txt)
+                fontsize = max(int(0.95*width/(len(ticks)*ntxt)), fontsize)
+                fontsize = min(12, fontsize)
+            for tick in cb.ax.get_xticklabels():
+                tick.set_fontsize(fontsize)
+                tick.set_color('black')
     else:
-        ticks = cb.ax.get_xticklabels()
-        for tick in ticks:
-            txt = tick.get_text()
-            ntxt = len(txt)
-            fontsize = max(int(0.95*width/(len(ticks)*ntxt)), fontsize)
-            fontsize = min(12, fontsize)
-        for tick in cb.ax.get_xticklabels():
-            tick.set_fontsize(fontsize)
-            tick.set_color('black')
+        cb.ax.xaxis.set_major_locator(NullLocator())
+
+    print add_ticks
 
     # Decorate colorbar
-    if 'units' in grid.attributes and 'long_name' in grid.attributes:
+    if add_label and 'units' in grid.attributes and \
+       'long_name' in grid.attributes:
         units = grid.attributes['units']
         long_name = grid.attributes['long_name'].capitalize()
         if orientation == 'vertical':
