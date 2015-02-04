@@ -29,6 +29,11 @@ from pydap.exceptions import ServerError
 from pydap.responses.lib import BaseResponse
 from pydap.util.template import GenshiRenderer, StringLoader, TemplateNotFound
 from pydap.lib import walk
+try:
+    from asteval import Interpreter
+except:
+    Interpreter = None
+
 
 # Local imports
 from arrowbarbs import arrow_barbs
@@ -37,7 +42,7 @@ import gridutils
 import plotutils
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
-                 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs']
+                 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs', 'expr']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 <!DOCTYPE WMT_MS_Capabilities SYSTEM "http://schemas.opengis.net/wms/1.1.1/WMS_MS_Capabilities.dtd"
@@ -240,7 +245,19 @@ class WMSResponse(BaseResponse):
                     pass
 
             # Get more query string parameters
-            orientation = query.get('styles', 'vertical')
+            styles = query.get('styles', 'vertical').split(',')
+            if 'horizontal' in styles:
+                orientation = 'horizontal'
+            else:
+                orientation = 'vertical'
+            if 'nolabel' in styles:
+                add_label = False
+            else:
+                add_label = True
+            if 'noticks' in styles:
+                add_ticks = False
+            else:
+                add_ticks = True
             transparent = asbool(query.get('transparent', 'true'))
 
             # Get WMS settings
@@ -264,7 +281,8 @@ class WMSResponse(BaseResponse):
             norm, cmap, extend = self._get_colors(cmapname, grid)
 
             output = plotutils.make_colorbar(w, h, dpi, grid, orientation, 
-                     transparent, norm, cmap, extend, paletted)
+                     transparent, norm, cmap, extend, paletted, add_label,
+                     add_ticks)
 
             if hasattr(dataset, 'close'): dataset.close()
             output = output.getvalue()
@@ -310,6 +328,7 @@ class WMSResponse(BaseResponse):
             query = parse_dict_querystring_lower(environ)
             dpi = float(environ.get('pydap.responses.wms.dpi', 80))
             fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
+            allow_eval = asbool(environ.get('pydap.responses.wms.allow_eval', 'false'))
             vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
             assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
                                    'pcolorfast']
@@ -343,10 +362,10 @@ class WMSResponse(BaseResponse):
                 .split(','))
             return query, dpi, fill_method, vector_method, vector_color, time, \
                    figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
-                   nthin_vector
+                   nthin_vector, allow_eval
         query, dpi, fill_method, vector_method, vector_color, time, figsize, \
-            bbox, cmapname, srs, styles, w, h, nthin_fill, nthin_vector = \
-            prep_map(environ)
+            bbox, cmapname, srs, styles, w, h, nthin_fill, nthin_vector, \
+            allow_eval = prep_map(environ)
 
         #@profile
         def serialize(dataset):
@@ -373,10 +392,32 @@ class WMSResponse(BaseResponse):
             # Plot requested grids (or all if none requested).
             layers = [layer for layer in query.get('layers', '').split(',')
                     if layer] or [var.id for var in walk(dataset, GridType)]
+            if allow_eval:
+                expr = query.get('expr', None)
+            else:
+                expr = None
             for layer in layers:
                 hlayers = layer.split('.')
                 vlayers = hlayers[-1].split(':')
-                if len(vlayers) == 1:
+                if expr is not None:
+                    # Plot expression
+                    grids = []
+                    for vlayer in vlayers:
+                        names = [dataset] + hlayers[:-2] + [vlayer]
+                        grid = reduce(operator.getitem, names)
+                        if not gridutils.is_valid(grid, dataset):
+                            raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
+                        if bbox is None:
+                            lon = gridutils.get_lon(grid, dataset)
+                            lat = gridutils.get_lat(grid, dataset)
+                            bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
+                        else:
+                            bbox_local = bbox[:]
+                        grids.append(grid)
+                    self._plot_grid(dataset, grids, time, bbox_local, (w, h), ax,
+                                    srs, fill_method, nthin_fill, cmapname,
+                                    expr=expr, layers=vlayers)
+                elif len(vlayers) == 1:
                     # Plot scalar field
                     names = [dataset] + hlayers
                     grid = reduce(operator.getitem, names)
@@ -718,7 +759,11 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method,
-                   nthin=(5, 5), cmapname='jet'):
+                   nthin=(5, 5), cmapname='jet', expr=None, layers=None):
+        if expr is not None:
+            aeval = Interpreter()
+            grids = grid
+            grid = grids[0]
         # We currently only support contour and contourf
         assert fill_method in ['contour', 'contourf']
 
@@ -745,12 +790,18 @@ class WMSResponse(BaseResponse):
                 lon += dlon
                 continue
             
-            X, Y, data = self._extract_data(l, (j0, j1, jstep),
-                         (i0, i1, istep), lat, lon, dlon, cyclic, [grid])
-            data = data[0]
+            if expr is None:
+                X, Y, data = self._extract_data(l, (j0, j1, jstep),
+                             (i0, i1, istep), lat, lon, dlon, cyclic, [grid])
+                data = data[0]
+            else:
+                X, Y, datas = self._extract_data(l, (j0, j1, jstep),
+                              (i0, i1, istep), lat, lon, dlon, cyclic, grids)
+                data = datas[0]
 
             # Plot data.
             if data.shape: 
+                # FIXME: Is this section really necessary - see vector method
                 # apply time slices
                 if l is not None:
                     data = np.asarray(data)
@@ -762,8 +813,22 @@ class WMSResponse(BaseResponse):
                     else:
                         data = np.asarray(data)
 
-                # reduce dimensions and mask missing_values
-                data = gridutils.fix_data(data, grid.attributes)
+                if expr is None:
+                    # reduce dimensions and mask missing_values
+                    data = gridutils.fix_data(data, grid.attributes)
+                else:
+                    # reduce dimensions and mask missing_values
+                    for i in range(len(datas)):
+                        datas[i] = gridutils.fix_data(datas[i], grids[i].attributes)
+                        aeval.symtable[layers[i]] = datas[i]
+                    data = aeval(expr)
+                    if len(aeval.error) > 0:
+                        errs = '\n'.join([str(e.get_error()) for e in aeval.error])
+                        #raise HTTPBadRequest('Error evaluating expression: "%s"'
+                        #                     'Error messages:\n%s' % (expr, errs))
+                        #raise ValueError('Error evaluating expression: %s\n'
+                        #                 'Error messages:\n%s' % (expr, errs))
+                        raise ValueError('Error evaluating expression: %s\n' % (expr))
 
                 # plot
                 #if data.shape and data.any():
@@ -825,6 +890,9 @@ class WMSResponse(BaseResponse):
                     pass
 
             gridutils.fix_map_attributes(dataset)
+            for grid in walk(dataset, GridType):
+                print grid
+                print gridutils.is_valid(grid, dataset)
             grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
 
             # Set global lon/lat ranges.
