@@ -92,8 +92,6 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
     else:
         cb.ax.xaxis.set_major_locator(NullLocator())
 
-    print add_ticks
-
     # Decorate colorbar
     if add_label and 'units' in grid.attributes and \
        'long_name' in grid.attributes:
