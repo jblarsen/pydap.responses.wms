@@ -986,11 +986,17 @@ class WMSResponse(BaseResponse):
             items = query.get('items', 'epoch').split(',')
 
             output = {}
+            expiretime = 86400
             for layer in layers:
                 output[layer] = {}
                 attrs = dataset[layer].attributes
+                # Only cache epoch and last_updated requests for 60 seconds
                 if 'epoch' in items and 'epoch' in attrs:
                     output[layer]['epoch'] = attrs['epoch']
+                    expiretime = 60
+                if 'last_updated' in items and 'last_updated' in attrs:
+                    output[layer]['last_updated'] = attrs['last_updated']
+                    expiretime = 60
                 if 'units' in items and 'units' in attrs:
                     output[layer]['units'] = attrs['units']
                 if 'long_name' in items and 'long_name' in attrs:
@@ -1000,7 +1006,7 @@ class WMSResponse(BaseResponse):
             if hasattr(dataset, 'close'): dataset.close()
             if last_modified is not None and self.cache:
                 key = ('capabilities', last_modified)
-                self.cache.set_value(key, output[:], expiretime=86400)
+                self.cache.set_value(key, output[:], expiretime=expiretime)
             return [output]
         return serialize
 
