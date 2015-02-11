@@ -7,6 +7,7 @@ import json
 import time
 import cPickle
 from rfc822 import parsedate
+from datetime import datetime
 
 from paste.request import construct_url, parse_dict_querystring
 from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
@@ -982,7 +983,7 @@ class WMSResponse(BaseResponse):
             base = location.split('?')[0].rstrip('.wms')
             query = parse_dict_querystring_lower(environ)
             layers = [layer for layer in query.get('layers', '').split(',')
-                    if layer] or [var.id for var in walk(dataset, GridType)]
+                    if layer] # or [var.id for var in walk(dataset, GridType)]
             items = query.get('items', 'epoch').split(',')
 
             output = {}
@@ -990,17 +991,23 @@ class WMSResponse(BaseResponse):
             for layer in layers:
                 output[layer] = {}
                 attrs = dataset[layer].attributes
-                # Only cache epoch and last_updated requests for 60 seconds
-                if 'epoch' in items and 'epoch' in attrs:
-                    output[layer]['epoch'] = attrs['epoch']
-                    expiretime = 60
-                if 'last_updated' in items and 'last_updated' in attrs:
-                    output[layer]['last_updated'] = attrs['last_updated']
-                    expiretime = 60
+                # Only cache epoch and last_modified requests for 60 seconds
                 if 'units' in items and 'units' in attrs:
                     output[layer]['units'] = attrs['units']
                 if 'long_name' in items and 'long_name' in attrs:
                     output[layer]['long_name'] = attrs['long_name']
+                if not output[layer]:
+                    del output[layer]
+            global_attrs = dataset.attributes['NC_GLOBAL']
+            if 'epoch' in items and 'epoch' in global_attrs:
+                output['epoch'] = global_attrs['epoch']
+                expiretime = 60
+            if 'last_modified' in items and last_modified is not None:
+                last_modified = datetime.fromtimestamp(
+                      time.mktime(parsedate(last_modified))). \
+                      strftime('%Y-%m-%dT%H:%M:%SZ')
+                output['last_modified'] = last_modified
+                expiretime = 60
             output = json.dumps(output)
 
             if hasattr(dataset, 'close'): dataset.close()
