@@ -7,6 +7,7 @@ import json
 import time
 import cPickle
 from rfc822 import parsedate
+from datetime import datetime
 
 from paste.request import construct_url, parse_dict_querystring
 from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
@@ -30,9 +31,9 @@ from pydap.responses.lib import BaseResponse
 from pydap.util.template import GenshiRenderer, StringLoader, TemplateNotFound
 from pydap.lib import walk
 try:
-    from asteval import Interpreter
+    from asteval_restricted import RestrictedInterpreter
 except:
-    Interpreter = None
+    RestrictedInterpreter = None
 
 
 # Local imports
@@ -42,7 +43,8 @@ import gridutils
 import plotutils
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
-                 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs', 'expr']
+                 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs', 'expr',
+                 'items']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 <!DOCTYPE WMT_MS_Capabilities SYSTEM "http://schemas.opengis.net/wms/1.1.1/WMS_MS_Capabilities.dtd"
@@ -164,11 +166,14 @@ class WMSResponse(BaseResponse):
         # Support cross-origin resource sharing (CORS)
         self.headers.append( ('Access-Control-Allow-Origin', '*') )
 
-        # Handle GetMap and GetCapabilities requests
+        # Handle GetMap, GetColorbar, GetCapabilities and GetMetadata requests
         type_ = query.get('request', 'GetMap')
         if type_ == 'GetCapabilities':
             self.serialize = self._get_capabilities(environ)
             self.headers.append( ('Content-type', 'text/xml') )
+        elif type_ == 'GetMetadata':
+            self.serialize = self._get_metadata(environ)
+            self.headers.append( ('Content-type', 'application/json') )
         elif type_ == 'GetMap':
             self.serialize = self._get_map(environ)
             self.headers.append( ('Content-type', 'image/png') )
@@ -761,7 +766,7 @@ class WMSResponse(BaseResponse):
     def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method,
                    nthin=(5, 5), cmapname='jet', expr=None, layers=None):
         if expr is not None:
-            aeval = Interpreter()
+            aeval = RestrictedInterpreter()
             grids = grid
             grid = grids[0]
         # We currently only support contour and contourf
@@ -890,9 +895,6 @@ class WMSResponse(BaseResponse):
                     pass
 
             gridutils.fix_map_attributes(dataset)
-            for grid in walk(dataset, GridType):
-                print grid
-                print gridutils.is_valid(grid, dataset)
             grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
 
             # Set global lon/lat ranges.
@@ -954,6 +956,64 @@ class WMSResponse(BaseResponse):
             if last_modified is not None and self.cache:
                 key = ('capabilities', last_modified)
                 self.cache.set_value(key, output[:], expiretime=86400)
+            return [output]
+        return serialize
+
+    def _get_metadata(self, environ):
+        def serialize(dataset):
+            # Check for cached version of JSON document
+            last_modified = None
+            for header in environ['pydap.headers']:
+                if 'Last-modified' in header:
+                    last_modified = header[1]
+            if last_modified is not None and self.cache:
+                try:
+                    key = ('metadata', last_modified)
+                    output = self.cache.get_value(key)[:]
+                    if hasattr(dataset, 'close'): dataset.close()
+                    return [output]
+                except KeyError:
+                    pass
+
+            gridutils.fix_map_attributes(dataset)
+            grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
+
+            # Remove ``REQUEST=GetMetadata`` from query string.
+            location = construct_url(environ, with_query_string=True)
+            base = location.split('?')[0].rstrip('.wms')
+            query = parse_dict_querystring_lower(environ)
+            layers = [layer for layer in query.get('layers', '').split(',')
+                    if layer] # or [var.id for var in walk(dataset, GridType)]
+            items = query.get('items', 'epoch').split(',')
+
+            output = {}
+            expiretime = 86400
+            for layer in layers:
+                output[layer] = {}
+                attrs = dataset[layer].attributes
+                # Only cache epoch and last_modified requests for 60 seconds
+                if 'units' in items and 'units' in attrs:
+                    output[layer]['units'] = attrs['units']
+                if 'long_name' in items and 'long_name' in attrs:
+                    output[layer]['long_name'] = attrs['long_name']
+                if not output[layer]:
+                    del output[layer]
+            global_attrs = dataset.attributes['NC_GLOBAL']
+            if 'epoch' in items and 'epoch' in global_attrs:
+                output['epoch'] = global_attrs['epoch']
+                expiretime = 60
+            if 'last_modified' in items and last_modified is not None:
+                last_modified = datetime.fromtimestamp(
+                      time.mktime(parsedate(last_modified))). \
+                      strftime('%Y-%m-%dT%H:%M:%SZ')
+                output['last_modified'] = last_modified
+                expiretime = 60
+            output = json.dumps(output)
+
+            if hasattr(dataset, 'close'): dataset.close()
+            if last_modified is not None and self.cache:
+                key = ('capabilities', last_modified)
+                self.cache.set_value(key, output[:], expiretime=expiretime)
             return [output]
         return serialize
 
