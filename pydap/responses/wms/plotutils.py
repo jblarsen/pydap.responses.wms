@@ -94,7 +94,6 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
             #cb.ax.xaxis.set_ticks()
             ticks = cb.ax.get_xticklabels()
             for tick in ticks:
-                print tick
                 txt = tick.get_text()
                 ntxt = len(txt)
                 fontsize = max(int(0.95*width/(len(ticks)*ntxt)), fontsize)
