@@ -54,7 +54,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
                 ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
         else:
             if add_ticks:
-                ax = fig.add_axes([0.05, 0.30, 0.90, 0.65])
+                ax = fig.add_axes([0.05, 0.35, 0.90, 0.60])
             else:
                 ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
     if transparent:
