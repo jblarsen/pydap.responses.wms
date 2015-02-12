@@ -2,6 +2,7 @@ from __future__ import division
 import ctypes
 from cStringIO import StringIO
 
+import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.colorbar import ColorbarBase
@@ -68,6 +69,16 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
     cb.patch.set_antialiased(False)
     cb.outline.set_antialiased(False)
 
+    def is_linear(norm):
+        """Returns True if norm is linear and False otherwise."""
+        bounds = norm.boundaries
+        db_linear = bounds[1]-bounds[0]
+        bounds_linear = np.arange(bounds[0], bounds[-1]+db_linear, db_linear)
+        if len(bounds) != len(bounds_linear):
+            return False
+        else:
+            return np.allclose(bounds, bounds_linear)
+
     if add_ticks:
         #    ticks.set_antialiased(False)
         if orientation == 'vertical':
@@ -80,8 +91,10 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
                 tick.set_fontsize(fontsize)
                 tick.set_color('black')
         else:
+            #cb.ax.xaxis.set_ticks()
             ticks = cb.ax.get_xticklabels()
             for tick in ticks:
+                print tick
                 txt = tick.get_text()
                 ntxt = len(txt)
                 fontsize = max(int(0.95*width/(len(ticks)*ntxt)), fontsize)
@@ -104,6 +117,9 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
 
     # Save to buffer.
     canvas = FigureCanvas(fig)
+    output = StringIO() 
+    canvas.print_png(output)
+    """
     if paletted:
         # The text on colorbars look bad when we disable antialiasing
         # entirely. We therefore just force the number of paletted
@@ -120,6 +136,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
     else:
         output = StringIO() 
         canvas.print_png(output)
+    """
     return output
 
 #@profile
