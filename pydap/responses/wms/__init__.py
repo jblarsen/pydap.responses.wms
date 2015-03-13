@@ -272,9 +272,9 @@ class WMSResponse(BaseResponse):
             # Set color bar size depending on orientation
             w, h = 100, 300
             if orientation == 'horizontal' and add_label:
-                w, h = 250, 70
+                w, h = 500, 140
             elif orientation == 'horizontal' and not add_label:
-                w, h = 250, 50
+                w, h = 500, 100
 
             gridutils.fix_map_attributes(dataset)
 

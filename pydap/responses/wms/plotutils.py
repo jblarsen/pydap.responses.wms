@@ -37,6 +37,7 @@ except:
 
 def make_colorbar(width, height, dpi, grid, orientation, transparent, norm, 
                   cmap, extend, paletted, add_label, add_ticks):
+    dpi = 2*dpi
     figsize = width/dpi, height/dpi
     fig = Figure(figsize=figsize, dpi=dpi, frameon=False)
 
@@ -46,7 +47,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         if orientation == 'vertical':
             ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
         else:
-            ax = fig.add_axes([0.05, 0.55, 0.90, 0.40])
+            ax = fig.add_axes([0.05, 0.55, 0.90, 0.30])
     else:
         if orientation == 'vertical':
             if add_ticks:
@@ -62,22 +63,17 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         fig.figurePatch.set_alpha(0.0)
         ax.axesPatch.set_alpha(0.5)
 
-    cb = ColorbarBase(ax, cmap=cmap, norm=norm,
-            orientation=orientation, extend=extend)
-    fontsize = 0
-    cb.solids.set_antialiased(False)
-    cb.patch.set_antialiased(False)
-    cb.outline.set_antialiased(False)
+    if len(norm.boundaries) <= 12: # label all colors
+        ticks = norm.boundaries
+    else:
+        ticks = None
+    cb = ColorbarBase(ax, cmap=cmap, norm=norm, ticks=ticks, drawedges=True,
+            orientation=orientation, extend=extend, extendfrac='auto')
 
-    def is_linear(norm):
-        """Returns True if norm is linear and False otherwise."""
-        bounds = norm.boundaries
-        db_linear = bounds[1]-bounds[0]
-        bounds_linear = np.arange(bounds[0], bounds[-1]+db_linear, db_linear)
-        if len(bounds) != len(bounds_linear):
-            return False
-        else:
-            return np.allclose(bounds, bounds_linear)
+    fontsize = 0
+    #cb.solids.set_antialiased(False)
+    #cb.patch.set_antialiased(False)
+    #cb.outline.set_antialiased(False)
 
     if add_ticks:
         #    ticks.set_antialiased(False)
@@ -93,11 +89,12 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         else:
             #cb.ax.xaxis.set_ticks()
             ticks = cb.ax.get_xticklabels()
+            stxt = 0
+            # get total ticks text
             for tick in ticks:
-                txt = tick.get_text()
-                ntxt = len(txt)
-                fontsize = max(int(0.95*width/(len(ticks)*ntxt)), fontsize)
-                fontsize = min(12, fontsize)
+                stxt += len(tick.get_text())
+            fontsize = width/(2*(stxt+5.0))
+            fontsize = max(min(12, fontsize),7)
             for tick in cb.ax.get_xticklabels():
                 tick.set_fontsize(fontsize)
                 tick.set_color('black')
