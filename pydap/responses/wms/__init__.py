@@ -255,10 +255,6 @@ class WMSResponse(BaseResponse):
                 orientation = 'horizontal'
             else:
                 orientation = 'vertical'
-            if 'nolabel' in styles:
-                add_label = False
-            else:
-                add_label = True
             if 'noticks' in styles:
                 add_ticks = False
             else:
@@ -271,10 +267,8 @@ class WMSResponse(BaseResponse):
 
             # Set color bar size depending on orientation
             w, h = 100, 300
-            if orientation == 'horizontal' and add_label:
-                w, h = 500, 140
-            elif orientation == 'horizontal' and not add_label:
-                w, h = 500, 100
+            if orientation == 'horizontal':
+                w, h = 500, 80
 
             gridutils.fix_map_attributes(dataset)
 
@@ -288,8 +282,7 @@ class WMSResponse(BaseResponse):
             norm, cmap, extend = self._get_colors(cmapname, grid)
 
             output = plotutils.make_colorbar(w, h, dpi, grid, orientation, 
-                     transparent, norm, cmap, extend, paletted, add_label,
-                     add_ticks)
+                     transparent, norm, cmap, extend, paletted, add_ticks)
 
             if hasattr(dataset, 'close'): dataset.close()
             output = output.getvalue()

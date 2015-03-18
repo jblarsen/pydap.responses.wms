@@ -36,29 +36,28 @@ except:
     wand = None
 
 def make_colorbar(width, height, dpi, grid, orientation, transparent, norm, 
-                  cmap, extend, paletted, add_label, add_ticks):
+                  cmap, extend, paletted, add_ticks):
     dpi = 2*dpi
     figsize = width/dpi, height/dpi
     fig = Figure(figsize=figsize, dpi=dpi, frameon=False)
 
     fig.set_facecolor('white')
     fig.set_edgecolor('none')
-    if add_label:
-        if orientation == 'vertical':
-            ax = fig.add_axes([0.05, 0.05, 0.35, 0.90])
+
+    if orientation == 'vertical':
+        if add_ticks:
+            ax = fig.add_axes([0.05, 0.05, 0.60, 0.90])
         else:
-            ax = fig.add_axes([0.05, 0.55, 0.90, 0.30])
+            ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
     else:
-        if orientation == 'vertical':
-            if add_ticks:
-                ax = fig.add_axes([0.05, 0.05, 0.60, 0.90])
-            else:
-                ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+        if add_ticks:
+            cbwidth = 0.95 # ratio of width to figsize
+            cbratio = 0.10 # ratio of width to height
+            cbheight= cbratio*cbwidth*width/float(height)
+            ax = fig.add_axes([(1-cbwidth)/2.0, 1-cbheight, cbwidth, cbheight])
         else:
-            if add_ticks:
-                ax = fig.add_axes([0.05, 0.35, 0.90, 0.60])
-            else:
-                ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+            ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+
     if transparent:
         fig.figurePatch.set_alpha(0.0)
         ax.axesPatch.set_alpha(0.5)
@@ -100,16 +99,6 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
                 tick.set_color('black')
     else:
         cb.ax.xaxis.set_major_locator(NullLocator())
-
-    # Decorate colorbar
-    if add_label and 'units' in grid.attributes and \
-       'long_name' in grid.attributes:
-        units = grid.attributes['units']
-        long_name = grid.attributes['long_name'].capitalize()
-        if orientation == 'vertical':
-            ax.set_ylabel('%s [%s]' % (long_name, units), fontsize=fontsize)
-        else:
-            ax.set_xlabel('%s [%s]' % (long_name, units), fontsize=12)
 
     # Save to buffer.
     canvas = FigureCanvas(fig)
