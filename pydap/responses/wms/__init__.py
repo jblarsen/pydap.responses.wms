@@ -259,6 +259,11 @@ class WMSResponse(BaseResponse):
                 add_ticks = False
             else:
                 add_ticks = True
+            if 'centerlabels' in styles:
+                center_labels = True
+            else:
+                center_labels = False
+
             transparent = asbool(query.get('transparent', 'true'))
 
             # Get WMS settings
@@ -282,7 +287,8 @@ class WMSResponse(BaseResponse):
             norm, cmap, extend = self._get_colors(cmapname, grid)
 
             output = plotutils.make_colorbar(w, h, dpi, grid, orientation, 
-                     transparent, norm, cmap, extend, paletted, add_ticks)
+                     transparent, norm, cmap, extend, paletted, add_ticks,
+                     center_labels)
 
             if hasattr(dataset, 'close'): dataset.close()
             output = output.getvalue()

@@ -36,7 +36,7 @@ except:
     wand = None
 
 def make_colorbar(width, height, dpi, grid, orientation, transparent, norm, 
-                  cmap, extend, paletted, add_ticks):
+                  cmap, extend, paletted, add_ticks, center_labels):
     dpi = 2*dpi
     figsize = width/dpi, height/dpi
     fig = Figure(figsize=figsize, dpi=dpi, frameon=False)
@@ -63,11 +63,20 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         ax.axesPatch.set_alpha(0.5)
 
     if len(norm.boundaries) <= 12: # label all colors
-        ticks = norm.boundaries
+        nb = norm.boundaries
+        if center_labels:
+            nb_pos = nb + (nb[1]-nb[0])*0.5
+        else:
+            nb_pos = nb
     else:
-        ticks = None
-    cb = ColorbarBase(ax, cmap=cmap, norm=norm, ticks=ticks, drawedges=True,
+        nb_pos = None
+      
+    cb = ColorbarBase(ax, cmap=cmap, norm=norm, ticks=nb_pos, drawedges=True,
             orientation=orientation, extend=extend, extendfrac='auto')
+
+    if center_labels:
+        cb.ax.set_xticklabels(nb)
+        cb.ax.tick_params('both', length=0, width=1)
 
     fontsize = 0
     #cb.solids.set_antialiased(False)
