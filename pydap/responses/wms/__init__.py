@@ -745,12 +745,18 @@ class WMSResponse(BaseResponse):
                         u,v = projutils.rotate_vector(p_base, p_query, data[0], 
                                 data[1], lons, lats, returnxy=False)
                     d = np.ma.sqrt(data[0]**2 + data[1]**2)
+                    # Custom increments since our data are in m/s
+                    barb_incs = {'half': 2.57222,
+                                 'full': 5.14444,
+                                 'flag': 25.7222}
                     if vector_method == 'black_barbs':
                         ax.barbs(X, Y, data[0], data[1], pivot='middle',
-                                 color=vector_color, antialiased=False)
+                                 color=vector_color, barb_increments=barb_incs,
+                                 antialiased=False)
                     elif vector_method == 'black_arrowbarbs':
                         arrow_barbs(ax, X, Y, data[0], data[1], pivot='middle',
-                                 color=vector_color, antialiased=False)
+                                 color=vector_color, barb_increments=barb_incs,
+                                 antialiased=False)
                     else:
                         #if vector_method == 'black_quiver':
                         ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
