@@ -20,9 +20,12 @@ from matplotlib.colors import Normalize
 from matplotlib import rcParams
 from matplotlib.colors import from_levels_and_colors
 from matplotlib.ticker import FormatStrFormatter
+from matplotlib.pyplot import setp
+from matplotlib.patheffects import withStroke
 
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
+rcParams['contour.negative_linestyle'] = 'solid'
 import pyproj
 
 from pydap.model import *
@@ -395,6 +398,10 @@ class WMSResponse(BaseResponse):
                 fig.figurePatch.set_alpha(0.0)
                 ax.axesPatch.set_alpha(0.0)
             
+            # Per default we only quantize fields if they have less than 
+            # 255 colors.
+            ncolors = None
+
             # Plot requested grids (or all if none requested).
             layers = [layer for layer in query.get('layers', '').split(',')
                     if layer] or [var.id for var in walk(dataset, GridType)]
@@ -454,6 +461,8 @@ class WMSResponse(BaseResponse):
                     self._plot_vector_grids(dataset, grids, time, bbox_local, 
                         (w, h), ax, srs, vector_method, vector_color, 
                         nthin_vector)
+                    if vector_method not in ['black_barbs', 'black_arrowbarbs']:
+                        ncolors = 7
 
             # Save to buffer.
             if bbox is not None:
@@ -463,7 +472,7 @@ class WMSResponse(BaseResponse):
             # Optionally convert to paletted png
             paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
             if paletted:
-                output = plotutils.convert_paletted(canvas)
+                output = plotutils.convert_paletted(canvas, ncolors=ncolors)
             else:
                 output = StringIO() 
                 canvas.print_png(output)
@@ -752,17 +761,18 @@ class WMSResponse(BaseResponse):
                     if vector_method == 'black_barbs':
                         ax.barbs(X, Y, data[0], data[1], pivot='middle',
                                  color=vector_color, barb_increments=barb_incs,
-                                 antialiased=False)
+                                 linewidth=1, length=7, antialiased=False)
                     elif vector_method == 'black_arrowbarbs':
                         arrow_barbs(ax, X, Y, data[0], data[1], pivot='middle',
                                  color=vector_color, barb_increments=barb_incs,
-                                 antialiased=False)
+                                 linewidth=1, length=7, antialiased=False)
                     else:
                         #if vector_method == 'black_quiver':
                         ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
                                   units='inches', scale=4.0, scale_units='inches',
-                                  width=0.02, color=vector_color, 
-                                  antialiased=False)
+                                  width=0.04, color=vector_color, linewidths=1,
+                                  headlength=4, headaxislength=3.5,
+                                  edgecolors=('w'), antialiased=True)
                         
             lon = lon_save
             lat = lat_save
@@ -878,7 +888,8 @@ class WMSResponse(BaseResponse):
                         cs = plot_method(X, Y, data, colors='black', levels=newlevels, 
                                     antialiased=False)
                         cs.levels = [fltfmt(val) for val in cs.levels]
-                        ax.clabel(cs, inline=1, fontsize=10)
+                        clbls = ax.clabel(cs, inline=1, fontsize=11, use_clabeltext=True)
+                        setp(clbls, path_effects=[withStroke(linewidth=2, foreground="white")])
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
             lon = lon_save
