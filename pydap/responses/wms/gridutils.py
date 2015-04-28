@@ -67,7 +67,8 @@ def get_time(grid, dataset):
         if ' since ' in dim.attributes.get('units', ''):
             calendar = dim.attributes.get('calendar', 'standard')
             try:
-                return netcdftime.num2date(np.asarray(dim), dim.units, calendar)
+                utime = netcdftime.utime(dim.units, calendar=calendar)
+                return utime.num2date(np.asarray(dim))
             except:
                 pass
 
@@ -194,7 +195,8 @@ def time_slice(time, grid, dataset):
                     l[(values >= start) & (values <= end)] = True
                 else:
                     instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                    instant = netcdftime.date2num(instant, dim.units, calendar)
+                    utime = netcdftime.utime(dim.units, calendar=calendar)
+                    instant = utime.date2num(instant)
                     # TODO: Calculate index directly
                     epoch = values[0]
                     values = values - epoch
