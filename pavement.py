@@ -51,7 +51,7 @@ scratch. This response enables Pydap to serve data as a WMS server.
 
         dependency_links=[],
         install_requires=[
-            'Pydap==3.1',
+            'Pydap==3.1.1',
             'Paste',
             'matplotlib',
             'coards',
