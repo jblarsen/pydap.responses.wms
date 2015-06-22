@@ -705,11 +705,11 @@ class WMSResponse(BaseResponse):
         return X, Y, data
 
     #@profile
-    def _plot_vector_grids(self, dataset, grids, time, bbox, size, ax, srs,
+    def _plot_vector_grids(self, dataset, grids, tm, bbox, size, ax, srs,
                            vector_method, vector_color, nthin=(54, 36)):
         try:
             # Slice according to time request (WMS-T).
-            l = gridutils.time_slice(time, grids[0], dataset)
+            l = gridutils.time_slice(tm, grids[0], dataset)
         except IndexError:
             # Return empty image for out of time range requests
             return
@@ -753,7 +753,6 @@ class WMSResponse(BaseResponse):
                         lons, lats = pyproj.transform(p_query, p_base, X, Y)
                         u,v = projutils.rotate_vector(p_base, p_query, data[0], 
                                 data[1], lons, lats, returnxy=False)
-                    d = np.ma.sqrt(data[0]**2 + data[1]**2)
                     # Custom increments since our data are in m/s
                     barb_incs = {'half': 2.57222,
                                  'full': 5.14444,
@@ -768,6 +767,7 @@ class WMSResponse(BaseResponse):
                                  linewidth=1, length=7, antialiased=False)
                     else:
                         #if vector_method == 'black_quiver':
+                        d = np.ma.sqrt(data[0]**2 + data[1]**2)
                         ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='middle',
                                   units='inches', scale=4.0, scale_units='inches',
                                   width=0.04, color=vector_color, linewidths=1,
@@ -1014,6 +1014,16 @@ class WMSResponse(BaseResponse):
                     output[layer]['units'] = attrs['units']
                 if 'long_name' in items and 'long_name' in attrs:
                     output[layer]['long_name'] = attrs['long_name']
+                if 'bounds' in items:
+                    lon = gridutils.get_lon(dataset[layer], dataset)
+                    lat = gridutils.get_lat(dataset[layer], dataset)
+                    minx, maxx = float(np.min(lon)), float(np.max(lon))
+                    miny, maxy = float(np.min(lat)), float(np.max(lat))
+                    output[layer]['bounds'] = [minx, miny, maxx, maxy]
+                if 'time' in items:
+                    tm = gridutils.get_time(dataset[layer], dataset)
+                    if tm is not None:
+                        output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
                 if not output[layer]:
                     del output[layer]
             global_attrs = dataset.attributes['NC_GLOBAL']
