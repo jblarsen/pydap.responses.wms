@@ -186,11 +186,11 @@ class WMSResponse(BaseResponse):
         else:
             raise HTTPBadRequest('Invalid REQUEST "%s"' % type_)
 
-        # Set response caching headers
-        self._set_caching_headers(environ)
-
         # Check if we should return a 304 Not Modified response
         self._check_last_modified(environ)
+
+        # Set response caching headers
+        self._set_caching_headers(environ)
 
         return BaseResponse.__call__(self, environ, start_response)
 
