@@ -176,7 +176,7 @@ class WMSResponse(BaseResponse):
             self.headers.append( ('Content-type', 'text/xml') )
         elif type_ == 'GetMetadata':
             self.serialize = self._get_metadata(environ)
-            self.headers.append( ('Content-type', 'application/json') )
+            self.headers.append( ('Content-type', 'application/json; charset=utf-8') )
         elif type_ == 'GetMap':
             self.serialize = self._get_map(environ)
             self.headers.append( ('Content-type', 'image/png') )
