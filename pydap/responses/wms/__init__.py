@@ -13,6 +13,8 @@ from paste.request import construct_url, parse_dict_querystring
 from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
 import numpy as np
+from scipy import interpolate
+from scipy.spatial import Delaunay
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.cm import get_cmap
@@ -714,6 +716,10 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
+        nnice = 15
+        X, Y = nice_points(bbox, nnice)
+        X, Y = np.meshgrid(X, Y)
+
         # Extract projected grid information
         lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
                 self._prepare_grid(srs, bbox, grids[0], dataset)
@@ -730,8 +736,42 @@ class WMSResponse(BaseResponse):
                 lon += dlon
                 continue
             
-            X, Y, data = self._extract_data(l, (j0, j1, jstep),
-                         (i0, i1, istep), lat, lon, dlon, cyclic, grids)
+            # Interpolate to these points
+            #data = [interp(lon, lat, np.asarray(grids[0].array[l,...]).squeeze(), X, Y),
+            #        interp(lon, lat, np.asarray(grids[1].array[l,...]).squeeze(), X, Y)]
+            lonf = lon.flatten()
+            latf = lat.flatten()
+            points = np.vstack((lonf, latf)).T
+            #tri = Delaunay(points)
+            data = []
+            ny, nx = X.shape
+            d1 = np.ma.empty((ny, nx))
+            d2 = np.ma.empty((ny, nx))
+            print lon.flatten().shape, lat.flatten().shape, np.asarray(grids[0].array[l,:,:]).squeeze().flatten().shape
+            #f = interpolate.interp2d(lon.flatten(), lat.flatten(), np.asarray(grids[0].array[l,:,:]).squeeze().flatten())
+            #f = interpolate.LinearNDInterpolator(tri, np.asarray(grids[0].array[l,:,:]).squeeze().flatten())
+            f = interpolate.NearestNDInterpolator(points, np.empty(lonf.shape))
+            start = time.clock()
+            points_out = np.vstack((X.flatten(), Y.flatten())).T
+            f.values = np.asarray(grids[0].array[l,:,:]).squeeze().flatten()
+            d1 = f(points_out).reshape((ny, nx))
+            f.values = np.asarray(grids[1].array[l,:,:]).squeeze().flatten()
+            d2 = f(points_out).reshape((ny, nx))
+            """
+            for j in range(ny):
+                for i in range(nx):
+                    a = f(X[j,i], Y[j,i])
+                    #flat_idx = np.argmin((lon-X[j,i])**2+(lat-Y[j,i])**2) # FIXME: Much too slow
+                    #jdx, idx = np.unravel_index(flat_idx, lon.shape)
+                    #d1[j,i] = np.asarray(grids[0].array[l,jdx,idx]).squeeze()
+                    #d2[j,i] = np.asarray(grids[1].array[l,jdx,idx]).squeeze()
+            """
+            end = time.clock()
+            print 'Elapsed time', end - start
+            data = [d1, d2]
+
+            #X, Y, data = self._extract_data(l, (j0, j1, jstep),
+            #             (i0, i1, istep), lat, lon, dlon, cyclic, grids)
 
             # Plot data.
             if data[0].shape: 
@@ -1067,3 +1107,23 @@ def parse_dict_querystring_lower(environ):
         v = query.pop(k)
         query[k.lower()] = v
     return query
+
+def nice_points(bbox, npoints):
+    """\
+    Returns nice coordinate points for a bbox with a given
+    space between. The coordinate points are padded so that
+    the bbox is always contained in the points.
+    """
+    origo = (0.0, 0.0)
+    xmin, ymin, xmax, ymax = bbox
+    dx = (xmax-xmin)/float(npoints)
+    dy = (ymax-ymin)/float(npoints)
+    # Calculate start and end of slices
+    x1 = int(np.floor(xmin/dx))*dx - dx
+    x2 = int(np.ceil(xmax/dx))*dx + dx
+    y1 = int(np.floor(ymin/dy))*dy - dy
+    y2 = int(np.ceil(ymax/dy))*dy + dy
+    xn = np.arange(x1, x2, dx)
+    yn = np.arange(y1, y2, dy)
+    return xn, yn
+
