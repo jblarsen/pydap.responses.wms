@@ -986,7 +986,7 @@ class WMSResponse(BaseResponse):
                     last_modified = header[1]
             if last_modified is not None and self.cache:
                 try:
-                    key = ('metadata', last_modified)
+                    key = ('metadata_all', last_modified)
                     output = self.cache.get_value(key)[:]
                     if hasattr(dataset, 'close'): dataset.close()
                     return [output]
@@ -1009,21 +1009,31 @@ class WMSResponse(BaseResponse):
             for layer in layers:
                 output[layer] = {}
                 attrs = dataset[layer].attributes
-                # Only cache epoch and last_modified requests for 60 seconds
+                # Only cache epoch, last_modified and time requests for 60 seconds
                 if 'units' in items and 'units' in attrs:
                     output[layer]['units'] = attrs['units']
                 if 'long_name' in items and 'long_name' in attrs:
                     output[layer]['long_name'] = attrs['long_name']
                 if 'bounds' in items:
-                    lon = gridutils.get_lon(dataset[layer], dataset)
-                    lat = gridutils.get_lat(dataset[layer], dataset)
-                    minx, maxx = float(np.min(lon)), float(np.max(lon))
-                    miny, maxy = float(np.min(lat)), float(np.max(lat))
-                    output[layer]['bounds'] = [minx, miny, maxx, maxy]
+                    try:
+                        if not self.cache:
+                            raise KeyError
+                        key = ('metadata_units', layer)
+                        output[layer]['bounds'] = self.cache.get_value(key)[:]
+                    except KeyError:
+                        lon = gridutils.get_lon(dataset[layer], dataset)
+                        lat = gridutils.get_lat(dataset[layer], dataset)
+                        minx, maxx = float(np.min(lon)), float(np.max(lon))
+                        miny, maxy = float(np.min(lat)), float(np.max(lat))
+                        output[layer]['bounds'] = [minx, miny, maxx, maxy]
+                        if self.cache:
+                            self.cache.set_value(key, output[layer]['bounds'],
+                                                 expiretime=864000)
                 if 'time' in items:
                     tm = gridutils.get_time(dataset[layer], dataset)
                     if tm is not None:
                         output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
+                        expiretime = 60
                 if not output[layer]:
                     del output[layer]
             global_attrs = dataset.attributes['NC_GLOBAL']
@@ -1040,7 +1050,7 @@ class WMSResponse(BaseResponse):
 
             if hasattr(dataset, 'close'): dataset.close()
             if last_modified is not None and self.cache:
-                key = ('capabilities', last_modified)
+                key = ('metadata_all', last_modified)
                 self.cache.set_value(key, output[:], expiretime=expiretime)
             return [output]
         return serialize
