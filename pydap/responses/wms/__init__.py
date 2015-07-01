@@ -4,8 +4,8 @@ from cStringIO import StringIO
 import re
 import operator
 import json
-import time
 import cPickle
+import time
 from rfc822 import parsedate
 from datetime import datetime
 
@@ -368,14 +368,13 @@ class WMSResponse(BaseResponse):
             nthin_fill = map(int, 
                 environ.get('pydap.responses.wms.fill_thinning', "12,12") \
                 .split(','))
-            nthin_vector = map(int, 
-                environ.get('pydap.responses.wms.vector_thinning', "54,36") \
-                .split(','))
+            npixels_vector = int(\
+                environ.get('pydap.responses.wms.pixels_between_vectors', 40))
             return query, dpi, fill_method, vector_method, vector_color, time, \
                    figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
-                   nthin_vector, allow_eval
+                   npixels_vector, allow_eval
         query, dpi, fill_method, vector_method, vector_color, time, figsize, \
-            bbox, cmapname, srs, styles, w, h, nthin_fill, nthin_vector, \
+            bbox, cmapname, srs, styles, w, h, nthin_fill, npixels_vector, \
             allow_eval = prep_map(environ)
 
         #@profile
@@ -462,7 +461,7 @@ class WMSResponse(BaseResponse):
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, bbox_local, 
                         (w, h), ax, srs, vector_method, vector_color, 
-                        nthin_vector)
+                        npixels_vector)
                     if vector_method not in ['black_barbs', 'black_arrowbarbs']:
                         ncolors = 7
 
@@ -708,7 +707,7 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_vector_grids(self, dataset, grids, tm, bbox, size, ax, srs,
-                           vector_method, vector_color, nthin=(54, 36)):
+                           vector_method, vector_color, npixels_vector):
         try:
             # Slice according to time request (WMS-T).
             l = gridutils.time_slice(tm, grids[0], dataset)
@@ -716,9 +715,11 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
-        nnice = 15
+        size_ave = np.mean(size)
+        nnice = int(size_ave/npixels_vector)
         X, Y = nice_points(bbox, nnice)
         X, Y = np.meshgrid(X, Y)
+        points_intp = np.vstack((X.flatten(), Y.flatten())).T
 
         # Extract projected grid information
         lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
@@ -729,49 +730,24 @@ class WMSResponse(BaseResponse):
             lon_save = lon[:]
             lat_save = lat[:]
 
-            try:
-                (j0, j1, jstep), (i0, i1, istep) = \
-                self._find_slices(lon, lat, dlon, bbox, cyclic, nthin, size)
-            except OutsideGridException:
-                lon += dlon
-                continue
+            #if outside_grid:
+            #    lon += dlon
+            #    continue
             
             # Interpolate to these points
-            #data = [interp(lon, lat, np.asarray(grids[0].array[l,...]).squeeze(), X, Y),
-            #        interp(lon, lat, np.asarray(grids[1].array[l,...]).squeeze(), X, Y)]
             lonf = lon.flatten()
             latf = lat.flatten()
             points = np.vstack((lonf, latf)).T
-            #tri = Delaunay(points)
             data = []
             ny, nx = X.shape
             d1 = np.ma.empty((ny, nx))
             d2 = np.ma.empty((ny, nx))
-            print lon.flatten().shape, lat.flatten().shape, np.asarray(grids[0].array[l,:,:]).squeeze().flatten().shape
-            #f = interpolate.interp2d(lon.flatten(), lat.flatten(), np.asarray(grids[0].array[l,:,:]).squeeze().flatten())
-            #f = interpolate.LinearNDInterpolator(tri, np.asarray(grids[0].array[l,:,:]).squeeze().flatten())
             f = interpolate.NearestNDInterpolator(points, np.empty(lonf.shape))
-            start = time.clock()
-            points_out = np.vstack((X.flatten(), Y.flatten())).T
             f.values = np.asarray(grids[0].array[l,:,:]).squeeze().flatten()
-            d1 = f(points_out).reshape((ny, nx))
+            d1 = f(points_intp).reshape((ny, nx))
             f.values = np.asarray(grids[1].array[l,:,:]).squeeze().flatten()
-            d2 = f(points_out).reshape((ny, nx))
-            """
-            for j in range(ny):
-                for i in range(nx):
-                    a = f(X[j,i], Y[j,i])
-                    #flat_idx = np.argmin((lon-X[j,i])**2+(lat-Y[j,i])**2) # FIXME: Much too slow
-                    #jdx, idx = np.unravel_index(flat_idx, lon.shape)
-                    #d1[j,i] = np.asarray(grids[0].array[l,jdx,idx]).squeeze()
-                    #d2[j,i] = np.asarray(grids[1].array[l,jdx,idx]).squeeze()
-            """
-            end = time.clock()
-            print 'Elapsed time', end - start
+            d2 = f(points_intp).reshape((ny, nx))
             data = [d1, d2]
-
-            #X, Y, data = self._extract_data(l, (j0, j1, jstep),
-            #             (i0, i1, istep), lat, lon, dlon, cyclic, grids)
 
             # Plot data.
             if data[0].shape: 
