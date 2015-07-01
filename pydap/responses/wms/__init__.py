@@ -717,9 +717,10 @@ class WMSResponse(BaseResponse):
  
         size_ave = np.mean(size)
         nnice = int(size_ave/npixels_vector)
-        X, Y = nice_points(bbox, nnice)
-        X, Y = np.meshgrid(X, Y)
+        X1d, Y1d = nice_points(bbox, nnice)
+        X, Y = np.meshgrid(X1d, Y1d)
         points_intp = np.vstack((X.flatten(), Y.flatten())).T
+
 
         # Extract projected grid information
         lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
@@ -730,9 +731,14 @@ class WMSResponse(BaseResponse):
             lon_save = lon[:]
             lat_save = lat[:]
 
-            #if outside_grid:
-            #    lon += dlon
-            #    continue
+            # We do not really need the slicing information but we want to
+            # see if an OutsideGridException is thrown
+            try:
+                (j0, j1, jstep), (i0, i1, istep) = \
+                self._find_slices(lon, lat, dlon, bbox, cyclic, (1, 1), size)
+            except OutsideGridException:
+                lon += dlon
+                continue
             
             # Interpolate to these points
             lonf = lon.flatten()
