@@ -14,7 +14,6 @@ from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
 import numpy as np
 from scipy import interpolate
-from scipy.spatial import Delaunay
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.cm import get_cmap
