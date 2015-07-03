@@ -14,6 +14,7 @@ from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
 import numpy as np
 from scipy import interpolate
+from scipy.spatial import ConvexHull
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.cm import get_cmap
@@ -720,12 +721,13 @@ class WMSResponse(BaseResponse):
         X, Y = np.meshgrid(X1d, Y1d)
         points_intp = np.vstack((X.flatten(), Y.flatten())).T
 
-
         # Extract projected grid information
         lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
                 self._prepare_grid(srs, bbox, grids[0], dataset)
 
+
         # Now we plot the data window until the end of the bbox:
+        cnt_window = 0
         while np.min(lon) < bbox[2]:
             lon_save = lon[:]
             lat_save = lat[:]
@@ -737,22 +739,52 @@ class WMSResponse(BaseResponse):
                 self._find_slices(lon, lat, dlon, bbox, cyclic, (1, 1), size)
             except OutsideGridException:
                 lon += dlon
+                cnt_window += 1
                 continue
             
-            # Interpolate to these points
-            lonf = lon.flatten()
-            latf = lat.flatten()
+            lonf = lon[j0:j1:jstep,i0:i1:istep].flatten()
+            latf = lat[j0:j1:jstep,i0:i1:istep].flatten()
             points = np.vstack((lonf, latf)).T
+
+            # Get convex hull mask and cache it
+            try:
+                if not self.cache:
+                    raise KeyError
+                key = (grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                in_hull = self.cache.get_value(key)
+            except KeyError:
+                hull = ConvexHull(points)
+                vertices = np.hstack([hull.vertices, hull.vertices[0]])
+                in_hull = np.ones(X.shape, dtype=bool)
+                for i in range(len(vertices)-1):
+                    v1 = vertices[i]
+                    v2 = vertices[i+1]
+                    x1, y1 = points[v1,:]
+                    x2, y2 = points[v2,:]
+                    left_simplex = np.sign((x2-x1)*(Y-y1) - (y2-y1)*(X-x1)) > -1
+                    in_hull = in_hull & left_simplex
+                in_hull = np.invert(in_hull)
+                if self.cache:
+                    in_hull_str = StringIO()
+                    key = (grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                    self.cache.set_value(key, in_hull)
+                    
             data = []
             ny, nx = X.shape
-            d1 = np.ma.empty((ny, nx))
-            d2 = np.ma.empty((ny, nx))
-            f = interpolate.NearestNDInterpolator(points, np.empty(lonf.shape))
-            f.values = np.asarray(grids[0].array[l,:,:]).squeeze().flatten()
-            d1 = f(points_intp).reshape((ny, nx))
-            f.values = np.asarray(grids[1].array[l,:,:]).squeeze().flatten()
-            d2 = f(points_intp).reshape((ny, nx))
-            data = [d1, d2]
+            data = []
+            for grid in grids:
+                attrs = grid.attributes
+                values = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
+                if 'missing_value' in attrs:
+                    missing_value = attrs['missing_value']
+                    values = np.ma.masked_equal(values, missing_value)
+                elif '_FillValue' in attrs:
+                    missing_value = attrs['_FillValue']
+                    values = np.ma.masked_equal(values, missing_value)
+                f = interpolate.NearestNDInterpolator(points, values)
+                d = np.ma.masked_equal(f(points_intp).reshape((ny, nx)), missing_value)
+                d = np.ma.masked_where(in_hull, d)
+                data.append(d)
 
             # Plot data.
             if data[0].shape: 
@@ -798,6 +830,7 @@ class WMSResponse(BaseResponse):
             lon = lon_save
             lat = lat_save
             lon += dlon
+            cnt_window += 1
 
 
     #@profile
@@ -1104,7 +1137,6 @@ def nice_points(bbox, npoints):
     x2 = int(np.ceil(xmax/dx))*dx + dx
     y1 = int(np.floor(ymin/dy))*dy - dy
     y2 = int(np.ceil(ymax/dy))*dy + dy
-    xn = np.arange(x1, x2, dx)
-    yn = np.arange(y1, y2, dy)
+    xn = np.round(np.arange(x1, x2+dx, dx), decimals=6)
+    yn = np.round(np.arange(y1, y2+dy, dy), decimals=6)
     return xn, yn
-
