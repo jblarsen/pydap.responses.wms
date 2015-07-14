@@ -810,14 +810,17 @@ class WMSResponse(BaseResponse):
                     barb_incs = {'half': 2.57222,
                                  'full': 5.14444,
                                  'flag': 25.7222}
+                    sizes = {'spacing': 0.2}
                     if vector_method == 'black_barbs':
                         ax.barbs(X, Y, data[0], data[1], pivot='middle',
                                  color=vector_color, barb_increments=barb_incs,
-                                 linewidth=1, length=7, antialiased=False)
+                                 linewidth=1, length=5.5, sizes=sizes,
+                                 antialiased=False)
                     elif vector_method == 'black_arrowbarbs':
                         arrow_barbs(ax, X, Y, data[0], data[1], pivot='middle',
                                  color=vector_color, barb_increments=barb_incs,
-                                 linewidth=1, length=7, antialiased=False)
+                                 linewidth=1, length=5.5, sizes=sizes,
+                                 antialiased=False)
                     else:
                         #if vector_method == 'black_quiver':
                         d = np.ma.sqrt(data[0]**2 + data[1]**2)
