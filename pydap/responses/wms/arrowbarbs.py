@@ -48,7 +48,7 @@ def _parse_args(*args):
 
 class ArrowBarbs(Barbs):
     def _make_barbs(self, u, v, nflags, nbarbs, half_barb, empty_flag, length,
-                    pivot, sizes, fill_empty, flip):
+                    pivot, sizes, fill_empty, flip, arrowhead=True):
         '''
         This function actually creates the wind barbs.  *u* and *v*
         are components of the vector in the *x* and *y* directions,
@@ -101,7 +101,7 @@ class ArrowBarbs(Barbs):
         empty_rad = length * sizes.get('emptybarb', 0.15)
 
         #Controls y point where to pivot the barb.
-        pivot_points = dict(tip=0.0, middle=-length / 2.)
+        pivot_points = dict(tip=0.0, middle=-length / 2., tail=-length)
 
         #Check for flip
         if flip:
@@ -109,6 +109,19 @@ class ArrowBarbs(Barbs):
 
         endx = 0.0
         endy = pivot_points[pivot.lower()]
+
+        # Hardcoded settings for width, spacing, and arrowhead
+        # Commented values is the same as quiver defaults
+        headaxislength = 2.5 #4.5
+        headlength     = 3   #5.0
+        headwidth      = 2   #3.0
+        width          = 0.15
+        width          = width*length
+        hwidth         = 0.5*width
+        headwidth      = width*(headwidth-1)
+        headlength     = width*headlength
+        headaxislength = headlength-width*headaxislength
+        spacing        = width*1.25
 
         # Get the appropriate angle for the vector components.  The offset is
         # due to the way the barb is initially drawn, going down the y-axis.
@@ -120,13 +133,15 @@ class ArrowBarbs(Barbs):
         # out here, it can be reused.  The center set here should put the
         # center of the circle at the location(offset), rather than at the
         # same point as the barb pivot; this seems more sensible.
-        circ = CirclePolygon((0, 0), radius=empty_rad).get_verts()
+        circ   = CirclePolygon((0, 0), radius=empty_rad).get_verts()
+        circ_o = CirclePolygon((0, 0), radius=empty_rad+hwidth).get_verts()
+        circ_i = CirclePolygon((0, 0), radius=empty_rad-hwidth).get_verts()
         if fill_empty:
             empty_barb = circ
         else:
             # If we don't want the empty one filled, we make a degenerate
-            # polygon that wraps back over itself
-            empty_barb = np.concatenate((circ, circ[::-1]))
+            # polygon that wraps back over itself (not optimal)
+            empty_barb = np.concatenate((circ_i, circ_o[::-1]))
 
         barb_list = []
         for index, angle in np.ndenumerate(angles):
@@ -138,9 +153,19 @@ class ArrowBarbs(Barbs):
                 barb_list.append(empty_barb)
                 continue
 
-            poly_verts = [(endx, endy), (endx-0.1*length, endy+0.2*length), 
-                          (endx+0.1*length, endy+0.2*length), (endx, endy)]
-            #poly_verts = [(endx, endy)]
+            if arrowhead:
+                # Fancy wind_barb with arrow
+                poly_verts = [(endx, endy),
+                              (endx+headwidth/2, endy+headaxislength),
+                              (endx-hwidth, endy-headlength+headaxislength),
+                              (endx-headwidth/2-width, endy+headaxislength),
+                              (endx-width, endy),
+                              (endx-width, endy+length)]
+            else:
+                # Normal wind_barb without arrow
+                poly_verts = [(endx, endy),
+                              (endx-hwidth, endy-hwidth),
+                              (endx-width, endy), (endx-width, endy+length)]
             offset = length
 
             # Add vertices for each flag
@@ -148,14 +173,12 @@ class ArrowBarbs(Barbs):
                 # The spacing that works for the barbs is a little to much for
                 # the flags, but this only occurs when we have more than 1
                 # flag.
-                if offset != length:
-                    offset += spacing / 2.
                 poly_verts.extend(
                     [[endx, endy + offset],
-                     [endx + full_height, endy - full_width / 2 + offset],
+                     [endx + full_height + hwidth, endy - full_width / 2 + offset],
                      [endx, endy - full_width + offset]])
 
-                offset -= full_width + spacing
+                offset -= full_width + spacing/4.0
 
             # Add vertices for each barb.  These really are lines, but works
             # great adding 3 vertices that basically pull the polygon out and
@@ -164,7 +187,9 @@ class ArrowBarbs(Barbs):
                 poly_verts.extend(
                     [(endx, endy + offset),
                      (endx + full_height, endy + offset + full_width / 2),
-                     (endx, endy + offset)])
+                     (endx + full_height + hwidth, endy + offset + full_width / 2 - hwidth),
+                     (endx + full_height, endy + offset + full_width / 2 - width),
+                     (endx, endy + offset - width)])
 
                 offset -= spacing
 
@@ -179,7 +204,9 @@ class ArrowBarbs(Barbs):
                 poly_verts.extend(
                     [(endx, endy + offset),
                      (endx + full_height / 2, endy + offset + full_width / 4),
-                     (endx, endy + offset)])
+                     (endx + full_height / 2 + hwidth, endy + offset + full_width / 4 - hwidth),
+                     (endx + full_height / 2, endy + offset + full_width / 4 - width),
+                     (endx, endy + offset - width)])
 
             # Rotate the barb according the angle. Making the barb first and
             # then rotating it made the math for drawing the barb really easy.
