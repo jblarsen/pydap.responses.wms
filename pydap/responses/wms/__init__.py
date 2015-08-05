@@ -462,8 +462,8 @@ class WMSResponse(BaseResponse):
                     self._plot_vector_grids(dataset, grids, time, bbox_local, 
                         (w, h), ax, srs, vector_method, vector_color, 
                         npixels_vector)
-                    if vector_method not in ['black_barbs']:
-                        ncolors = 7
+                    # Force paletting of all vector plots to max 7 colors
+                    ncolors = 7
 
             # Save to buffer.
             if bbox is not None:
@@ -810,15 +810,26 @@ class WMSResponse(BaseResponse):
                     barb_incs = {'half': 2.57222,
                                  'full': 5.14444,
                                  'flag': 25.7222}
-                    sizes = {'spacing': 0.2}
                     if vector_method == 'black_barbs':
-                        ax.barbs(X, Y, data[0], data[1], pivot='tail',
-                                 color=vector_color, barb_increments=barb_incs,
-                                 linewidth=1, length=5.5, sizes=sizes,
-                                 antialiased=False)
-                    elif vector_method == 'black_arrowbarbs':
+                        sizes = {'spacing': 0.2,
+                                 'width': 0.2,
+                                 'headwidth': 1.0,
+                                 'headlength': 1.0,
+                                 'headaxislength': 1.0,
+                                 'emptybarb': 0.2}
                         arrow_barbs(ax, X, Y, data[0], data[1], pivot='tail', 
-                                    length=5.5, linewidth=0.5, color=vector_color,
+                                    length=5.5, linewidth=1, color=vector_color,
+                                    edgecolor='w', antialiased=True, fill_empty=True,
+                                    sizes=sizes, barb_increments=barb_incs)
+                    elif vector_method == 'black_arrowbarbs':
+                        sizes = {'spacing': 0.2,
+                                 'width': 0.2,
+                                 'headwidth': 2.0,
+                                 'headlength': 1.0,
+                                 'headaxislength': 1.25,
+                                 'emptybarb': 0.2}
+                        arrow_barbs(ax, X, Y, data[0], data[1], pivot='tail', 
+                                    length=5.5, linewidth=1, color=vector_color,
                                     edgecolor='w', antialiased=True, fill_empty=True,
                                     sizes=sizes, barb_increments=barb_incs)
                     else:

@@ -48,7 +48,7 @@ def _parse_args(*args):
 
 class ArrowBarbs(Barbs):
     def _make_barbs(self, u, v, nflags, nbarbs, half_barb, empty_flag, length,
-                    pivot, sizes, fill_empty, flip, arrowhead=True):
+                    pivot, sizes, fill_empty, flip):
         '''
         This function actually creates the wind barbs.  *u* and *v*
         are components of the vector in the *x* and *y* directions,
@@ -95,10 +95,18 @@ class ArrowBarbs(Barbs):
 
         #These control the spacing and size of barb elements relative to the
         #length of the shaft
-        spacing = length * sizes.get('spacing', 0.125)
-        full_height = length * sizes.get('height', 0.4)
-        full_width = length * sizes.get('width', 0.25)
-        empty_rad = length * sizes.get('emptybarb', 0.15)
+        spacing         = length * sizes.get('spacing', 0.15)
+        full_height     = length * sizes.get('full_height', 0.4)
+        full_width      = length * sizes.get('full_width', 0.3)
+        empty_rad       = length * sizes.get('emptybarb', 0.3)
+        width           = length * sizes.get('width', 0.05)
+        headwidth       =  width *(sizes.get('headwidth', 1.0) - 1)
+        headlength      =  width * sizes.get('headlength', 1.0)
+        headaxislength  =  width * sizes.get('headaxislength', 1.0)
+
+        hwidth          = 0.5*width
+        headaxislength  = headlength-headaxislength
+        spacing         = max(spacing, width*1.1)
 
         #Controls y point where to pivot the barb.
         pivot_points = dict(tip=0.0, middle=-length / 2., tail=-length)
@@ -109,19 +117,6 @@ class ArrowBarbs(Barbs):
 
         endx = 0.0
         endy = pivot_points[pivot.lower()]
-
-        # Hardcoded settings for width, spacing, and arrowhead
-        # Commented values is the same as quiver defaults
-        headaxislength = 2.5 #4.5
-        headlength     = 3   #5.0
-        headwidth      = 2   #3.0
-        width          = 0.15
-        width          = width*length
-        hwidth         = 0.5*width
-        headwidth      = width*(headwidth-1)
-        headlength     = width*headlength
-        headaxislength = headlength-width*headaxislength
-        spacing        = width*1.25
 
         # Get the appropriate angle for the vector components.  The offset is
         # due to the way the barb is initially drawn, going down the y-axis.
@@ -153,19 +148,13 @@ class ArrowBarbs(Barbs):
                 barb_list.append(empty_barb)
                 continue
 
-            if arrowhead:
-                # Fancy wind_barb with arrow
-                poly_verts = [(endx, endy),
-                              (endx+headwidth/2, endy+headaxislength),
-                              (endx-hwidth, endy-headlength+headaxislength),
-                              (endx-headwidth/2-width, endy+headaxislength),
-                              (endx-width, endy),
-                              (endx-width, endy+length)]
-            else:
-                # Normal wind_barb without arrow
-                poly_verts = [(endx, endy),
-                              (endx-hwidth, endy-hwidth),
-                              (endx-width, endy), (endx-width, endy+length)]
+            # Wind_barb with arrow
+            poly_verts = [(endx, endy),
+                          (endx+headwidth/2, endy+headaxislength),
+                          (endx-hwidth, endy-headlength+headaxislength),
+                          (endx-headwidth/2-width, endy+headaxislength),
+                          (endx-width, endy),
+                          (endx-width, endy+length)]
             offset = length
 
             # Add vertices for each flag
@@ -178,7 +167,7 @@ class ArrowBarbs(Barbs):
                      [endx + full_height + hwidth, endy - full_width / 2 + offset],
                      [endx, endy - full_width + offset]])
 
-                offset -= full_width + spacing/4.0
+                offset -= full_width + spacing/2.0
 
             # Add vertices for each barb.  These really are lines, but works
             # great adding 3 vertices that basically pull the polygon out and
