@@ -817,7 +817,7 @@ class WMSResponse(BaseResponse):
                                  'headlength': 1.0,
                                  'headaxislength': 1.0,
                                  'emptybarb': 0.2}
-                        arrow_barbs(ax, X, Y, data[0], data[1], pivot='tail', 
+                        arrow_barbs(ax, X, Y, data[0], data[1], pivot='head', 
                                     length=5.5, linewidth=1, color=vector_color,
                                     edgecolor='w', antialiased=True, fill_empty=True,
                                     sizes=sizes, barb_increments=barb_incs)
@@ -828,7 +828,7 @@ class WMSResponse(BaseResponse):
                                  'headlength': 1.0,
                                  'headaxislength': 1.25,
                                  'emptybarb': 0.2}
-                        arrow_barbs(ax, X, Y, data[0], data[1], pivot='tail', 
+                        arrow_barbs(ax, X, Y, data[0], data[1], pivot='head', 
                                     length=5.5, linewidth=1, color=vector_color,
                                     edgecolor='w', antialiased=True, fill_empty=True,
                                     sizes=sizes, barb_increments=barb_incs)
