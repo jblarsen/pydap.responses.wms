@@ -361,7 +361,8 @@ class WMSResponse(BaseResponse):
             style_elems = styles.split(',')
             vector_color = 'k' 
             if style_elems[0] in ['black_vector', 'black_quiver', 
-                                  'black_barbs', 'black_arrowbarbs']:
+                                  'black_barbs', 'black_arrowbarbs',
+                                  'color_vectors']:
                 vector_method = style_elems[0]
                 if len(style_elems) > 1:
                     vector_color = style_elems[1]
@@ -461,7 +462,7 @@ class WMSResponse(BaseResponse):
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, bbox_local, 
                         (w, h), ax, srs, vector_method, vector_color, 
-                        npixels_vector)
+                        cmapname, npixels_vector)
                     # Force paletting of all vector plots to max 7 colors
                     ncolors = 7
 
@@ -707,7 +708,7 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_vector_grids(self, dataset, grids, tm, bbox, size, ax, srs,
-                           vector_method, vector_color, npixels_vector):
+                           vector_method, vector_color, cmapname, npixels_vector):
         try:
             # Slice according to time request (WMS-T).
             l = gridutils.time_slice(tm, grids[0], dataset)
@@ -832,6 +833,32 @@ class WMSResponse(BaseResponse):
                                     length=5.5, linewidth=1, color=vector_color,
                                     edgecolor='w', antialiased=True, fill_empty=True,
                                     sizes=sizes, barb_increments=barb_incs)
+                    elif vector_method == 'color_vectors':
+                        if cmapname in self.colors:
+                            norm = self.colors[cmapname]['norm']
+                            cmap = self.colors[cmapname]['cmap']
+                            levels = norm.boundaries
+                        else:
+                            # Get actual data range for levels.
+                            actual_range = self._get_actual_range(grid)
+                            norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
+                            ncolors = 15
+                            dlev = (actual_range[1] - actual_range[0])/ncolors
+                            levels = np.arange(actual_range[0], actual_range[1]+dlev, dlev)
+                            cmap = get_cmap(cmapname)
+                        newlevels = levels[:]
+                        dtype = newlevels.dtype
+                        if cmap.colorbar_extend in ['min', 'both']:
+                            newlevels = np.insert(newlevels, 0, np.finfo(dtype).min)
+                        if cmap.colorbar_extend in ['max', 'both']:
+                            newlevels = np.append(newlevels, np.finfo(dtype).max)
+                        d = np.ma.sqrt(data[0]**2 + data[1]**2)
+                        ax.quiver(X, Y, data[0]/d, data[1]/d, d, pivot='tail',
+                                  units='inches', scale=4.0, scale_units='inches',
+                                  width=0.04, linewidths=1,
+                                  headlength=4, headaxislength=3.5,
+                                  norm=norm, cmap=cmap,
+                                  edgecolors=('w'), antialiased=True)
                     else:
                         #if vector_method == 'black_quiver':
                         d = np.ma.sqrt(data[0]**2 + data[1]**2)
