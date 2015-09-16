@@ -85,10 +85,10 @@ def fix_data(data, attrs):
 
     # When scale_factor or add_offset are present we always assume float array
     if attrs.get('scale_factor'):
-        data.astype(np.float32)
+        data = data.astype(np.float32)
         data *= attrs['scale_factor']
     if attrs.get('add_offset'):
-        data.astype(np.float32)
+        data = data.astype(np.float32)
         data += attrs['add_offset']
 
     while len(data.shape) > 2:
