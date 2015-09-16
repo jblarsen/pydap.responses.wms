@@ -83,8 +83,13 @@ def fix_data(data, attrs):
     elif '_FillValue' in attrs:
         data = np.ma.masked_equal(data, attrs['_FillValue'])
 
-    if attrs.get('scale_factor'): data *= attrs['scale_factor']
-    if attrs.get('add_offset'): data += attrs['add_offset']
+    # When scale_factor or add_offset are present we always assume float array
+    if attrs.get('scale_factor'):
+        data.astype(np.float32)
+        data *= attrs['scale_factor']
+    if attrs.get('add_offset'):
+        data.astype(np.float32)
+        data += attrs['add_offset']
 
     while len(data.shape) > 2:
         if data.shape[0] != 1:

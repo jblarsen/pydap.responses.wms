@@ -198,10 +198,12 @@ class TestWMSResponse(object):
                     'data/FCOO/GETM/nsbalt.2Dvars.1nm.2D.1h.DK1NM-v002C.nc',
                     'data/FCOO/GETM/nsbalt.salt-temp.1nm.surface.1h.DK1NM-v002C.nc',
                     'data/FCOO/GETM/nsbalt.velocities.1nm.surface.1h.DK1NM-v002C.nc',
-                    'data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
-                    'data/ECMWF/DXD/ECMWF_DXD_GREENLAND.nc',
-                    'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc',
-                    'data/ECMWF/DXP/ECMWF_DXP_GREENLAND.nc',
+                    'data/ECMWF/DXD/MAPS_ECMWF_DXD_AFR.nc',
+                    'data/ECMWF/DXD/MAPS_ECMWF_DXD_DENMARK.nc',
+                    'data/ECMWF/DXD/MAPS_ECMWF_DXD_GREENLAND.nc',
+                    'data/ECMWF/DXP/MAPS_ECMWF_DXP_AFR.nc',
+                    'data/ECMWF/DXP/MAPS_ECMWF_DXP_DENMARK.nc',
+                    'data/ECMWF/DXP/MAPS_ECMWF_DXP_GREENLAND.nc',
                     'data/DMI/HIRLAM/DMI_HIRLAM_K05.nc',
                     'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
                     'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
@@ -278,10 +280,12 @@ if __name__ == '__main__':
                 'data/FCOO/GETM/nsbalt.2Dvars.1nm.2D.1h.DK1NM-v002C.nc',
                 'data/FCOO/GETM/nsbalt.salt-temp.1nm.surface.1h.DK1NM-v002C.nc',
                 'data/FCOO/GETM/nsbalt.velocities.1nm.surface.1h.DK1NM-v002C.nc',
-                'data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
-                'data/ECMWF/DXD/ECMWF_DXD_GREENLAND.nc',
-                'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc',
-                'data/ECMWF/DXP/ECMWF_DXP_GREENLAND.nc',
+                'data/ECMWF/DXD/MAPS_ECMWF_DXD_AFR.nc',
+                'data/ECMWF/DXD/MAPS_ECMWF_DXD_DENMARK.nc',
+                'data/ECMWF/DXD/MAPS_ECMWF_DXD_GREENLAND.nc',
+                'data/ECMWF/DXP/MAPS_ECMWF_DXP_AFR.nc',
+                'data/ECMWF/DXP/MAPS_ECMWF_DXP_DENMARK.nc',
+                'data/ECMWF/DXP/MAPS_ECMWF_DXP_GREENLAND.nc',
                 'data/DMI/HIRLAM/DMI_HIRLAM_K05.nc',
                 'data/DMI/HIRLAM/GETM_DMI_HIRLAM_T15_v004C.nc',
                 'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
@@ -301,10 +305,11 @@ if __name__ == '__main__':
                 'data/DMI/HIRLAM/METPREP_DMI_HIRLAM_S03_NSBALTIC3NM_v003C.nc']
     """
     #datapaths= ['data/NOAA/HYCOM/NOAA_HYCOM_GREENLAND.nc']
-    datapaths= ['data/ECMWF/DXD/ECMWF_DXD_GLOBAL.nc',
-                'data/ECMWF/DXP/ECMWF_DXP_GLOBAL.nc']
+    datapaths= ['data/ECMWF/DXD/MAPS_ECMWF_DXD_AFR.nc',
+                'data/ECMWF/DXD/MAPS_ECMWF_DXD_DENMARK.nc',
+                'data/ECMWF/DXD/MAPS_ECMWF_DXD_GREENLAND.nc']
     #datapaths= ['data/FCOO/GETM/idk.velocities.600m.surface.1h.DK600-v004C.nc']
-    layers = ['u10_v10', 'u_velocity_v_velocity', 'uu_vv', 'u_v', 'U10M_V10M']
+    layers = ['U10', 'V10', 'windspeed']
     #make_requests(n=10, wmslist=datapaths, layerlist=layers, doprofiling=False, saveimg=False)
     #make_requests(n=4, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=False, saveimg=False)
     #make_requests(n=2, wmslist=datapaths, layerlist=layers, dotiming=False, doprofiling=True, saveimg=False)
