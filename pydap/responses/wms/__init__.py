@@ -703,8 +703,6 @@ class WMSResponse(BaseResponse):
                             gdata = np.ma.concatenate((gdata,
                                                        grid.array[l,j0:j1:jstep,0:di:istep]), axis=-1)
             else:
-                if level is None:
-                    level = 0
                 gdata = np.asarray(grid.array[l,level,j0:j1:jstep,i0:i1:istep])
                 if cyclic:
                     if len(lon.shape) == 1:
@@ -798,7 +796,10 @@ class WMSResponse(BaseResponse):
             data = []
             for grid in grids:
                 attrs = grid.attributes
-                values = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
+                if gridutils.get_vertical(grid) is None:
+                    values = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
+                else:
+                    values = np.asarray(grid.array[l,level,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
                 if 'missing_value' in attrs:
                     missing_value = attrs['missing_value']
                     values = np.ma.masked_equal(values, missing_value)
