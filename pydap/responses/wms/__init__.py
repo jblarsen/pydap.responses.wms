@@ -1153,7 +1153,7 @@ class WMSResponse(BaseResponse):
                     if tm is not None:
                         output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
                         expiretime = 60
-                levels = gridutils.get_vertical(dataset[layer], dataset)
+                levels = gridutils.get_vertical(dataset[layer])
                 if levels is not None and 'levels' in items:
                     output[layer]['levels'] = {}
                     output[layer]['levels']['values'] = np.asarray(levels).tolist()
