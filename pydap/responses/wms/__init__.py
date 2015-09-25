@@ -705,8 +705,6 @@ class WMSResponse(BaseResponse):
             else:
                 if level is None:
                     level = 0
-                print level
-                print grid.shape
                 gdata = np.asarray(grid.array[l,level,j0:j1:jstep,i0:i1:istep])
                 if cyclic:
                     if len(lon.shape) == 1:
