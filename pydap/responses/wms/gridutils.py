@@ -62,7 +62,7 @@ def get_lat(grid, dataset):
 
     return None
 
-def get_time(grid, dataset):
+def get_time(grid):
     for dim in grid.maps.values():
         if ' since ' in dim.attributes.get('units', ''):
             calendar = dim.attributes.get('calendar', 'standard')
@@ -73,6 +73,26 @@ def get_time(grid, dataset):
                 pass
 
     return None
+
+def get_vertical(grid):
+    for dim in grid.maps.values():
+        if isvertical(dim):
+            return dim
+
+    return None
+
+def isvertical(dim):
+    """Returns True if input variable is a vertical variable."""
+    upressure = ['bar', 'atmosphere', 'atm', 'pascal', 'pa', 'hpa']
+    #uother = ['meter', 'metre', 'm', 'kilometer', 'km', 'level', 'layer', \
+    #           'sigma_level']
+    u = getattr(dim, 'units', '')
+    if hasattr(dim, 'positive') or u.lower() in upressure:
+        return True
+    # GETM hack
+    if u.lower() == 'level':
+        return True
+    return False
 
 #@profile
 def fix_data(data, attrs):

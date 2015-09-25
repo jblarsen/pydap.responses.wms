@@ -48,8 +48,8 @@ import gridutils
 import plotutils
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
-                 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs', 'expr',
-                 'items']
+                 'level', 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs', 
+                 'expr', 'items']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
 <!DOCTYPE WMT_MS_Capabilities SYSTEM "http://schemas.opengis.net/wms/1.1.1/WMS_MS_Capabilities.dtd"
@@ -110,7 +110,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
           from pydap.responses.wms.gridutils import get_lon, get_lat, get_time
           lon = get_lon(grid, dataset)
           lat = get_lat(grid, dataset)
-          time = get_time(grid, dataset)
+          time = get_time(grid)
           minx, maxx = np.min(lon), np.max(lon)
           miny, maxy = np.min(lat), np.max(lat)
       ?>
@@ -347,6 +347,7 @@ class WMSResponse(BaseResponse):
             h = float(query.get('height', 256))
             time = query.get('time')
             if time == 'current': time = None
+            level = int(query.get('level', 0))
             figsize = w/dpi, h/dpi
             bbox = query.get('bbox', None)
             if bbox is not None:
@@ -372,11 +373,11 @@ class WMSResponse(BaseResponse):
             npixels_vector = int(\
                 environ.get('pydap.responses.wms.pixels_between_vectors', 40))
             return query, dpi, fill_method, vector_method, vector_color, time, \
-                   figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
-                   npixels_vector, allow_eval
-        query, dpi, fill_method, vector_method, vector_color, time, figsize, \
-            bbox, cmapname, srs, styles, w, h, nthin_fill, npixels_vector, \
-            allow_eval = prep_map(environ)
+                   level, figsize, bbox, cmapname, srs, styles, w, h, \
+                   nthin_fill, npixels_vector, allow_eval
+        query, dpi, fill_method, vector_method, vector_color, time, level, \
+            figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
+            npixels_vector, allow_eval = prep_map(environ)
 
         #@profile
         def serialize(dataset):
@@ -429,9 +430,9 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         grids.append(grid)
-                    self._plot_grid(dataset, grids, time, bbox_local, (w, h), ax,
-                                    srs, fill_method, nthin_fill, cmapname,
-                                    expr=expr, layers=vlayers)
+                    self._plot_grid(dataset, grids, time, level, bbox_local, 
+                                    (w, h), ax, srs, fill_method, nthin_fill,
+                                    cmapname, expr=expr, layers=vlayers)
                 elif len(vlayers) == 1:
                     # Plot scalar field
                     names = [dataset] + hlayers
@@ -443,8 +444,9 @@ class WMSResponse(BaseResponse):
                             bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
                         else:
                             bbox_local = bbox[:]
-                        self._plot_grid(dataset, grid, time, bbox_local, (w, h), ax,
-                                        srs, fill_method, nthin_fill, cmapname)
+                        self._plot_grid(dataset, grid, time, level, bbox_local,
+                                        (w, h), ax, srs, fill_method,
+                                        nthin_fill, cmapname)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -460,9 +462,9 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         grids.append(grid)
-                    self._plot_vector_grids(dataset, grids, time, bbox_local, 
-                        (w, h), ax, srs, vector_method, vector_color, 
-                        cmapname, npixels_vector)
+                    self._plot_vector_grids(dataset, grids, time, level,
+                        bbox_local, (w, h), ax, srs, vector_method, 
+                        vector_color, cmapname, npixels_vector)
                     # Force paletting of all vector plots to max 7 colors
                     ncolors = 7
 
@@ -654,7 +656,7 @@ class WMSResponse(BaseResponse):
         return (j0, j1, jstep), (i0, i1, istep)
 
     #@profile
-    def _extract_data(self, l, (j0, j1, jstep), (i0, i1, istep), 
+    def _extract_data(self, l, level, (j0, j1, jstep), (i0, i1, istep), 
                       lat, lon, dlon, cyclic, grids):
         """Returns coordinate and data arrays given slicing information."""
         # TODO: Currently we just select the first lon value for cyclic
@@ -683,22 +685,45 @@ class WMSResponse(BaseResponse):
         data = []
         for grid in grids:
             # The line below is a performance bottleneck.
-            gdata = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep])
-            if cyclic:
-                if len(lon.shape) == 1:
-                    gdata = np.ma.concatenate((
-                        gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])), -1)
-                else:
-                    if i0 < 0:
-                        # The leftmost bound is to the left of the grid origin
-                        ii = lon.shape[1] + i0
-                        gdata = np.ma.concatenate((grid.array[l,j0:j1:jstep,ii:-1:istep], 
-                                                   gdata), axis=-1)
-                    if i1 > lon.shape[1]:
-                        # The rightmost bound is to the right of the grid extent
-                        di = i1 - lon.shape[1]
-                        gdata = np.ma.concatenate((gdata,
-                                                   grid.array[l,j0:j1:jstep,0:di:istep]), axis=-1)
+            if gridutils.get_vertical(grid) is None:
+                gdata = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep])
+                if cyclic:
+                    if len(lon.shape) == 1:
+                        gdata = np.ma.concatenate((
+                            gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])), -1)
+                    else:
+                        if i0 < 0:
+                            # The leftmost bound is to the left of the grid origin
+                            ii = lon.shape[1] + i0
+                            gdata = np.ma.concatenate((grid.array[l,j0:j1:jstep,ii:-1:istep], 
+                                                       gdata), axis=-1)
+                        if i1 > lon.shape[1]:
+                            # The rightmost bound is to the right of the grid extent
+                            di = i1 - lon.shape[1]
+                            gdata = np.ma.concatenate((gdata,
+                                                       grid.array[l,j0:j1:jstep,0:di:istep]), axis=-1)
+            else:
+                if level is None:
+                    level = 0
+                print level
+                print grid.shape
+                gdata = np.asarray(grid.array[l,level,j0:j1:jstep,i0:i1:istep])
+                if cyclic:
+                    if len(lon.shape) == 1:
+                        gdata = np.ma.concatenate((
+                            gdata, np.asarray(grid.array[l,level,j0:j1:jstep,0:1])), -1)
+                    else:
+                        if i0 < 0:
+                            # The leftmost bound is to the left of the grid origin
+                            ii = lon.shape[1] + i0
+                            gdata = np.ma.concatenate((grid.array[l,level,j0:j1:jstep,ii:-1:istep], 
+                                                       gdata), axis=-1)
+                        if i1 > lon.shape[1]:
+                            # The rightmost bound is to the right of the grid extent
+                            di = i1 - lon.shape[1]
+                            gdata = np.ma.concatenate((gdata,
+                                                       grid.array[l,level,j0:j1:jstep,0:di:istep]), axis=-1)
+
             data.append(gdata)
 
         # Postcondition
@@ -707,7 +732,7 @@ class WMSResponse(BaseResponse):
         return X, Y, data
 
     #@profile
-    def _plot_vector_grids(self, dataset, grids, tm, bbox, size, ax, srs,
+    def _plot_vector_grids(self, dataset, grids, tm, level, bbox, size, ax, srs,
                            vector_method, vector_color, cmapname, npixels_vector):
         try:
             # Slice according to time request (WMS-T).
@@ -875,8 +900,9 @@ class WMSResponse(BaseResponse):
 
 
     #@profile
-    def _plot_grid(self, dataset, grid, time, bbox, size, ax, srs, fill_method,
-                   nthin=(5, 5), cmapname='jet', expr=None, layers=None):
+    def _plot_grid(self, dataset, grid, time, level, bbox, size, ax, srs,
+                   fill_method, nthin=(5, 5), cmapname='jet', expr=None,
+                   layers=None):
         if expr is not None:
             aeval = RestrictedInterpreter()
             grids = grid
@@ -908,11 +934,11 @@ class WMSResponse(BaseResponse):
                 continue
             
             if expr is None:
-                X, Y, data = self._extract_data(l, (j0, j1, jstep),
+                X, Y, data = self._extract_data(l, level, (j0, j1, jstep),
                              (i0, i1, istep), lat, lon, dlon, cyclic, [grid])
                 data = data[0]
             else:
-                X, Y, datas = self._extract_data(l, (j0, j1, jstep),
+                X, Y, datas = self._extract_data(l, level, (j0, j1, jstep),
                               (i0, i1, istep), lat, lon, dlon, cyclic, grids)
                 data = datas[0]
 
@@ -1125,10 +1151,21 @@ class WMSResponse(BaseResponse):
                             self.cache.set_value(key, output[layer]['bounds'],
                                                  expiretime=864000)
                 if 'time' in items:
-                    tm = gridutils.get_time(dataset[layer], dataset)
+                    tm = gridutils.get_time(dataset[layer])
                     if tm is not None:
                         output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
                         expiretime = 60
+                levels = gridutils.get_vertical(dataset[layer], dataset)
+                if levels is not None and 'levels' in items:
+                    output[layer]['levels'] = {}
+                    output[layer]['levels']['values'] = np.asarray(levels).tolist()
+                    if 'units' in levels.attributes:
+                        output[layer]['levels']['units'] = levels.attributes['units']
+                    if 'long_name' in levels.attributes:
+                        output[layer]['levels']['long_name'] = levels.attributes['long_name']
+                    if 'positive' in levels.attributes:
+                        output[layer]['levels']['positive'] = levels.attributes['positive']
+
                 if not output[layer]:
                     del output[layer]
             global_attrs = dataset.attributes['NC_GLOBAL']
