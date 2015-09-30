@@ -737,6 +737,11 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
+        # Return empty image for vertical indices out of range
+        vertical = gridutils.get_vertical(grids[0])
+        if vertical is not None and vertical.shape[0] <= level:
+            return
+
         size_ave = np.mean(size)
         nnice = int(size_ave/npixels_vector)
         X1d, Y1d = nice_points(bbox, nnice)
@@ -916,6 +921,11 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
+        # Return empty image for vertical indices out of range
+        vertical = gridutils.get_vertical(grid)
+        if vertical is not None and vertical.shape[0] <= level:
+            return
+
         # Extract projected grid information
         lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
                   self._prepare_grid(srs, bbox, grid, dataset)
