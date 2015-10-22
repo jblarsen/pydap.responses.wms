@@ -467,12 +467,13 @@ class WMSResponse(BaseResponse):
                         bbox_local, (w, h), ax, srs, vector_method, 
                         vector_color, cmapname, npixels_vector)
                     # Force paletting of black vector plots to max 7 colors
-                    # and 64 for colored vectors
+                    # and 127 for color vectors (disabled - antialiasing is
+                    # disabled for color vectors for now)
                     if vector_method in ['black_vector', 'black_quiver', 
                                          'black_barbs', 'black_arrowbarbs']:
                         ncolors = 7
-                    else:
-                        ncolors = 64
+                    #else:
+                    #    ncolors = 127
 
             # Save to buffer.
             if bbox is not None:
@@ -901,28 +902,28 @@ class WMSResponse(BaseResponse):
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.0825, linewidths=1, headwidth=2,
                         headlength=2, headaxislength=2,
-                        edgecolors=('k'), antialiased=True,
+                        edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver2':
                         ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.0825, linewidths=1, headwidth=2,
                         headlength=1, headaxislength=1,
-                        edgecolors=('k'), antialiased=True,
+                        edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver3':
                         ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.05, linewidths=1, headwidth=3,
                         headlength=1.5, headaxislength=1.5,
-                        edgecolors=('k'), antialiased=True,
+                        edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver4':
                         ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.1875, linewidths=1, headwidth=1,
                         headlength=0.5, headaxislength=0.5,
-                        edgecolors=('k'), antialiased=True,
+                        edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     else:
                         #if vector_method == 'black_quiver':
