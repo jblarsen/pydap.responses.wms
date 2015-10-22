@@ -363,7 +363,8 @@ class WMSResponse(BaseResponse):
             vector_color = 'k' 
             if style_elems[0] in ['black_vector', 'black_quiver', 
                                   'black_barbs', 'black_arrowbarbs',
-                                  'color_vectors']:
+                                  'color_quiver1', 'color_quiver2',
+                                  'color_quiver3', 'color_quiver4']:
                 vector_method = style_elems[0]
                 if len(style_elems) > 1:
                     vector_color = style_elems[1]
@@ -840,6 +841,34 @@ class WMSResponse(BaseResponse):
                     barb_incs = {'half': 2.57222,
                                  'full': 5.14444,
                                  'flag': 25.7222}
+
+                    # Colormap information
+                    if cmapname in self.colors:
+                        norm = self.colors[cmapname]['norm']
+                        cmap = self.colors[cmapname]['cmap']
+                        levels = norm.boundaries
+                    else:
+                        # Get actual data range for levels.
+                        actual_range = self._get_actual_range(grid)
+                        norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
+                        ncolors = 15
+                        dlev = (actual_range[1] - actual_range[0])/ncolors
+                        levels = np.arange(actual_range[0], actual_range[1]+dlev, dlev)
+                        cmap = get_cmap(cmapname)
+                    newlevels = levels[:]
+                    dtype = newlevels.dtype
+                    if cmap.colorbar_extend in ['min', 'both']:
+                        newlevels = np.insert(newlevels, 0, np.finfo(dtype).min)
+                    if cmap.colorbar_extend in ['max', 'both']:
+                        newlevels = np.append(newlevels, np.finfo(dtype).max)
+
+                    # Vector magnitude
+                    d = np.ma.sqrt(data[0]**2 + data[1]**2)
+
+                    # Construct limiter
+                    dmin = newlevels[1]
+                    di = np.where(d<dmin, 0, 1/d)
+
                     if vector_method == 'black_barbs':
                         sizes = {'spacing': 0.2,
                                  'width': 0.2,
@@ -862,36 +891,37 @@ class WMSResponse(BaseResponse):
                                     length=5.5, linewidth=1, color=vector_color,
                                     edgecolor='w', antialiased=True, fill_empty=True,
                                     sizes=sizes, barb_increments=barb_incs)
-                    elif vector_method == 'color_vectors':
-                        if cmapname in self.colors:
-                            norm = self.colors[cmapname]['norm']
-                            cmap = self.colors[cmapname]['cmap']
-                            levels = norm.boundaries
-                        else:
-                            # Get actual data range for levels.
-                            actual_range = self._get_actual_range(grid)
-                            norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
-                            ncolors = 15
-                            dlev = (actual_range[1] - actual_range[0])/ncolors
-                            levels = np.arange(actual_range[0], actual_range[1]+dlev, dlev)
-                            cmap = get_cmap(cmapname)
-                        newlevels = levels[:]
-                        dtype = newlevels.dtype
-                        if cmap.colorbar_extend in ['min', 'both']:
-                            newlevels = np.insert(newlevels, 0, np.finfo(dtype).min)
-                        if cmap.colorbar_extend in ['max', 'both']:
-                            newlevels = np.append(newlevels, np.finfo(dtype).max)
-                        d = np.ma.sqrt(data[0]**2 + data[1]**2)
-                        ax.quiver(X, Y, data[0]/d, data[1]/d, d, pivot='tail',
-                                  units='inches', scale=4.0, scale_units='inches',
-                                  width=0.04, linewidths=1,
-                                  headlength=4, headaxislength=3.5,
-                                  norm=norm, cmap=cmap,
-                                  edgecolors=('w'), antialiased=True)
+                    elif vector_method == 'color_quiver1':
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
+                        units='inches', scale=4.0, scale_units='inches',
+                        width=0.0825, linewidths=1, headwidth=2,
+                        headlength=2, headaxislength=2,
+                        edgecolors=('k'), antialiased=True,
+                        norm=norm, cmap=cmap)
+                    elif vector_method == 'color_quiver2':
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
+                        units='inches', scale=4.0, scale_units='inches',
+                        width=0.0825, linewidths=1, headwidth=2,
+                        headlength=1, headaxislength=1,
+                        edgecolors=('k'), antialiased=True,
+                        norm=norm, cmap=cmap)
+                    elif vector_method == 'color_quiver3':
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
+                        units='inches', scale=4.0, scale_units='inches',
+                        width=0.05, linewidths=1, headwidth=3,
+                        headlength=1.5, headaxislength=1.5,
+                        edgecolors=('k'), antialiased=True,
+                        norm=norm, cmap=cmap)
+                    elif vector_method == 'color_quiver4':
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
+                        units='inches', scale=4.0, scale_units='inches',
+                        width=0.1875, linewidths=1, headwidth=1,
+                        headlength=0.5, headaxislength=0.5,
+                        edgecolors=('k'), antialiased=True,
+                        norm=norm, cmap=cmap)
                     else:
                         #if vector_method == 'black_quiver':
-                        d = np.ma.sqrt(data[0]**2 + data[1]**2)
-                        ax.quiver(X, Y, data[0]/d, data[1]/d, pivot='tail',
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, pivot='tail',
                                   units='inches', scale=4.0, scale_units='inches',
                                   width=0.04, color=vector_color, linewidths=1,
                                   headlength=4, headaxislength=3.5,
