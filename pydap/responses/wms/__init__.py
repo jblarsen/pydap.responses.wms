@@ -467,12 +467,12 @@ class WMSResponse(BaseResponse):
                         bbox_local, (w, h), ax, srs, vector_method, 
                         vector_color, cmapname, npixels_vector)
                     # Force paletting of black vector plots to max 7 colors
-                    # and 32 for colored vectors
+                    # and 64 for colored vectors
                     if vector_method in ['black_vector', 'black_quiver', 
                                          'black_barbs', 'black_arrowbarbs']:
                         ncolors = 7
                     else:
-                        ncolors = 32
+                        ncolors = 64
 
             # Save to buffer.
             if bbox is not None:
