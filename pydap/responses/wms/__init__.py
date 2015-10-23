@@ -363,24 +363,28 @@ class WMSResponse(BaseResponse):
             vector_color = 'k' 
 
             # Process style element
-            styles = query.get('styles', fill_method).split(',')
-            for style in styles:
-                key, value = style.split('=')
-                if key == 'fill_method':
-                    if value in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
-                        fill_method = value
-                elif key == 'vector_method':
-                    if value in ['black_vector', 'black_quiver', 
-                                  'black_barbs', 'black_arrowbarbs',
-                                  'color_quiver1', 'color_quiver2',
-                                  'color_quiver3', 'color_quiver4']:
-                        vector_method = value
-                elif key == 'vector_color':
-                    vector_color = value
-                elif key == 'vector_spacing':
-                    vector_spacing = int(value)
-                elif key == 'vector_offset':
-                    vector_offset = int(value)
+            styles = query.get('styles', 'fill_method=' + fill_method)
+            if len(styles) > 0:
+                styles = styles.split(',')
+                for style in styles:
+                    key, value = style.split('=')
+                    if key == 'fill_method':
+                        if value in ['contour', 'contourf', 
+                                     'pcolor', 'pcolormesh',
+                                     'pcolorfast']:
+                            fill_method = value
+                    elif key == 'vector_method':
+                        if value in ['black_vector', 'black_quiver', 
+                                     'black_barbs', 'black_arrowbarbs',
+                                     'color_quiver1', 'color_quiver2',
+                                     'color_quiver3', 'color_quiver4']:
+                            vector_method = value
+                    elif key == 'vector_color':
+                        vector_color = value
+                    elif key == 'vector_spacing':
+                        vector_spacing = int(value)
+                    elif key == 'vector_offset':
+                        vector_offset = int(value)
 
             nthin_fill = map(int, 
                 environ.get('pydap.responses.wms.fill_thinning', "12,12") \
