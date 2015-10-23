@@ -355,30 +355,42 @@ class WMSResponse(BaseResponse):
             cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
             srs = query.get('srs', 'EPSG:4326')
             if srs == 'EPSG:900913': srs = 'EPSG:3785'
-            # Override fill_method by user requested style
-            styles = query.get('styles', fill_method)
-            if styles in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
-                fill_method = styles
-            style_elems = styles.split(',')
+
+            # Default vector settings
+            vector_spacing = int(\
+                environ.get('pydap.responses.wms.pixels_between_vectors', 40))
+            vector_offset = 0
             vector_color = 'k' 
-            if style_elems[0] in ['black_vector', 'black_quiver', 
+
+            # Process style element
+            styles = query.get('styles', fill_method).split(',')
+            for style in styles:
+                key, value = style.split('=')
+                if key == 'fill_method':
+                    if value in ['contour', 'contourf', 'pcolor', 'pcolormesh', 'pcolorfast']:
+                        fill_method = value
+                elif key == 'vector_method':
+                    if value in ['black_vector', 'black_quiver', 
                                   'black_barbs', 'black_arrowbarbs',
                                   'color_quiver1', 'color_quiver2',
                                   'color_quiver3', 'color_quiver4']:
-                vector_method = style_elems[0]
-                if len(style_elems) > 1:
-                    vector_color = style_elems[1]
+                        vector_method = value
+                elif key == 'vector_color':
+                    vector_color = value
+                elif key == 'vector_spacing':
+                    vector_spacing = int(value)
+                elif key == 'vector_offset':
+                    vector_offset = int(value)
+
             nthin_fill = map(int, 
                 environ.get('pydap.responses.wms.fill_thinning', "12,12") \
                 .split(','))
-            npixels_vector = int(\
-                environ.get('pydap.responses.wms.pixels_between_vectors', 40))
             return query, dpi, fill_method, vector_method, vector_color, time, \
                    level, figsize, bbox, cmapname, srs, styles, w, h, \
-                   nthin_fill, npixels_vector, allow_eval
+                   nthin_fill, vector_spacing, vector_offset, allow_eval
         query, dpi, fill_method, vector_method, vector_color, time, level, \
             figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
-            npixels_vector, allow_eval = prep_map(environ)
+            vector_spacing, vector_offset, allow_eval = prep_map(environ)
 
         #@profile
         def serialize(dataset):
@@ -465,7 +477,7 @@ class WMSResponse(BaseResponse):
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, level,
                         bbox_local, (w, h), ax, srs, vector_method, 
-                        vector_color, cmapname, npixels_vector)
+                        vector_color, cmapname, vector_spacing, vector_offset)
                     # Force paletting of black vector plots to max 7 colors
                     # and 127 for color vectors (disabled - antialiasing is
                     # disabled for color vectors for now)
@@ -736,7 +748,8 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_vector_grids(self, dataset, grids, tm, level, bbox, size, ax, srs,
-                           vector_method, vector_color, cmapname, npixels_vector):
+                           vector_method, vector_color, cmapname, vector_spacing,
+                           vector_offset):
         try:
             # Slice according to time request (WMS-T).
             l = gridutils.time_slice(tm, grids[0], dataset)
@@ -750,8 +763,9 @@ class WMSResponse(BaseResponse):
             return
 
         size_ave = np.mean(size)
-        nnice = int(size_ave/npixels_vector)
-        X1d, Y1d = nice_points(bbox, nnice)
+        nnice = int(size_ave/vector_spacing)
+        offset = vector_offset/size_ave
+        X1d, Y1d = nice_points(bbox, nnice, offset)
         X, Y = np.meshgrid(X1d, Y1d)
         points_intp = np.vstack((X.flatten(), Y.flatten())).T
 
@@ -1245,21 +1259,27 @@ def parse_dict_querystring_lower(environ):
         query[k.lower()] = v
     return query
 
-def nice_points(bbox, npoints):
+def nice_points(bbox, npoints, offset):
     """\
     Returns nice coordinate points for a bbox with a given
     space between. The coordinate points are padded so that
     the bbox is always contained in the points.
+
+    Offset is specified as a fraction of the bbox.
     """
-    origo = (0.0, 0.0)
     xmin, ymin, xmax, ymax = bbox
     dx = (xmax-xmin)/float(npoints)
     dy = (ymax-ymin)/float(npoints)
+    x0 = (xmax-xmin)*offset
+    y0 = (ymax-ymin)*offset
+    if abs(x0) > abs(dx) or abs(y0) > abs(dy):
+        raise HTTPBadRequest('Offset too large "%s"' % offset)
+         
     # Calculate start and end of slices
-    x1 = int(np.floor(xmin/dx))*dx - dx
-    x2 = int(np.ceil(xmax/dx))*dx + dx
-    y1 = int(np.floor(ymin/dy))*dy - dy
-    y2 = int(np.ceil(ymax/dy))*dy + dy
+    x1 = int(np.floor(xmin/dx))*dx - dx + x0
+    x2 = int(np.ceil(xmax/dx))*dx + dx + x0
+    y1 = int(np.floor(ymin/dy))*dy - dy + y0
+    y2 = int(np.ceil(ymax/dy))*dy + dy + y0
     xn = np.round(np.arange(x1, x2+dx, dx), decimals=6)
     yn = np.round(np.arange(y1, y2+dy, dy), decimals=6)
     return xn, yn
