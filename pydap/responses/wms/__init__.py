@@ -240,11 +240,14 @@ class WMSResponse(BaseResponse):
                 del colorfile
 
     def _get_colorbar(self, environ):
-        def serialize(dataset):
-            # Get query string parameters
-            query = parse_dict_querystring_lower(environ)
-            cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+        # Get query string parameters
+        query = parse_dict_querystring_lower(environ)
 
+        # Get colorbar name and check whether it is valid
+        cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+        self._get_cmap(cmapname)
+
+        def serialize(dataset):
             # Check for cached version of colorbar
             if self.global_cache:
                 try:
@@ -314,7 +317,7 @@ class WMSResponse(BaseResponse):
         else:
             actual_range = self._get_actual_range(grid)
             norm = Normalize(vmin=actual_range[0], vmax=actual_range[1])
-            cmap = get_cmap(cmapname)
+            cmap = self._get_cmap(cmapname)
             extend = 'neither'
         return norm, cmap, extend
 
@@ -331,6 +334,16 @@ class WMSResponse(BaseResponse):
                 key = (grid.id, 'actual_range')
                 self.cache.set_value(key, actual_range)
         return actual_range
+
+    def _get_cmap(self, name):
+        """Tries to get local colormap first and then a mpl colormap."""
+        try:
+            cmap = self.colors[name]
+        except KeyError:
+            try:
+                cmap = get_cmap(name)
+            except ValueError as e:
+                raise HTTPBadRequest('Colormap Error: %s' % e.message)
 
     #@profile
     def _get_map(self, environ):
@@ -352,7 +365,10 @@ class WMSResponse(BaseResponse):
             bbox = query.get('bbox', None)
             if bbox is not None:
                 bbox = [float(v) for v in bbox.split(',')]
+            # Get colorbar name and check whether it is valid by getting it
             cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+            self._get_cmap(cmapname)
+
             srs = query.get('srs', 'EPSG:4326')
             if srs == 'EPSG:900913': srs = 'EPSG:3785'
 
@@ -889,7 +905,7 @@ class WMSResponse(BaseResponse):
                         ncolors = 15
                         dlev = (actual_range[1] - actual_range[0])/ncolors
                         levels = np.arange(actual_range[0], actual_range[1]+dlev, dlev)
-                        cmap = get_cmap(cmapname)
+                        cmap = self._get_cmap(cmapname)
                     newlevels = levels[:]
                     dtype = newlevels.dtype
                     if cmap.colorbar_extend in ['min', 'both']:
@@ -1062,7 +1078,7 @@ class WMSResponse(BaseResponse):
                         ncolors = 15
                         dlev = (actual_range[1] - actual_range[0])/ncolors
                         levels = np.arange(actual_range[0], actual_range[1]+dlev, dlev)
-                        cmap = get_cmap(cmapname)
+                        cmap = self._get_cmap(cmapname)
                     if fill_method == 'contourf':
                         newlevels = levels[:]
                         dtype = newlevels.dtype
