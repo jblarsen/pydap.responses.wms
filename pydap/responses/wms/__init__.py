@@ -344,6 +344,7 @@ class WMSResponse(BaseResponse):
                 cmap = get_cmap(name)
             except ValueError as e:
                 raise HTTPBadRequest('Colormap Error: %s' % e.message)
+        return cmap
 
     #@profile
     def _get_map(self, environ):
