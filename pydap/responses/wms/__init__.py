@@ -513,8 +513,9 @@ class WMSResponse(BaseResponse):
         """
         # Plot the data over all the extension of the bbox.
         # First we "rewind" the data window to the begining of the bbox:
-        lon = gridutils.get_lon(grid, dataset)
-        cyclic = hasattr(lon, 'modulo')
+        lonGrid = gridutils.get_lon(grid, dataset)
+        latGrid = gridutils.get_lat(grid, dataset)
+        cyclic = hasattr(lonGrid, 'modulo')
 
         # We assume that lon/lat arrays are centered on data points
         base_srs = 'EPSG:4326'
@@ -550,10 +551,20 @@ class WMSResponse(BaseResponse):
                   (grid.id, srs, 'project_data'))
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
+            # Check that the dimensions match - otherwise discard
+            # cached value and recalculate
+            if len(lonGrid.shape) == 1:
+                shapeGrid = (latGrid.shape[0], lonGrid.shape[0])
+            else:
+                shapeGrid = lonGrid.shape
+            if shapeGrid != lon.shape or shapeGrid != lat.shape:
+                self.cache.clear()
+                raise KeyError
+            
         except KeyError:
             # Project data
-            lon = np.asarray(lon[:])
-            lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
+            lon = np.asarray(lonGrid[:])
+            lat = np.asarray(latGrid[:])
             if not do_proj:
                 dlon = 360.0
             else:
