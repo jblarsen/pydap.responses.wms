@@ -945,8 +945,8 @@ class WMSResponse(BaseResponse):
                                     sizes=sizes, barb_increments=barb_incs)
                     elif vector_method == 'color_quiver1':
                         ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='tail',
-                        units='inches', scale=3.0, scale_units='inches',
-                        width=0.0825, linewidths=0.5, headwidth=2,
+                        units='inches', scale=2.0, scale_units='inches',
+                        width=0.165, linewidths=0.5, headwidth=2,
                         headlength=2, headaxislength=2,
                         edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
