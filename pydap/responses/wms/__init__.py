@@ -664,9 +664,12 @@ class WMSResponse(BaseResponse):
             i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
             I, J = np.meshgrid(i, j)
 
+            # Find points within bounding box
             xcond = (lon >= bbox[0]) & (lon <= bbox[2])
             ycond = (lat >= bbox[1]) & (lat <= bbox[3])
-            if (not xcond.any() or not ycond.any()):
+            cond = xcond & ycond
+
+            if not cond.any():
                 # When bbox "falls between" grid cells xcond and ycond are
                 # all false. So we have an additional check for that
                 if not xcond.any():
@@ -678,32 +681,25 @@ class WMSResponse(BaseResponse):
                     else:
                         ycond2 = ((lat[:-1,:] >= bbox[3]) & (lat[1:,:] <= bbox[1]))
                     ycond[:-1,:] = ycond2
-                if (not xcond.any() or not ycond.any()):
+                cond = xcond & ycond
+                if not cond.any():
                     raise OutsideGridException
 
+            # Avoid oversampling
             istep = max(1, int(np.floor( (nthin_lon * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
             jstep = max(1, int(np.floor( (nthin_lat * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
-            i0 = 0
-            j0 = 0
-            lon1 = lon[j0::jstep,i0::istep]
-            lat1 = lat[j0::jstep,i0::istep]
-            # Find containing bound in reduced indices
-            i, j = np.arange(lon1.shape[1]), np.arange(lon1.shape[0])
-            I, J = np.meshgrid(i, j)
-            xcond = (lon1 >= bbox[0]) & (lon1 <= bbox[2])
-            ycond = (lat1 >= bbox[1]) & (lat1 <= bbox[3])
-            if not xcond.any() or not ycond.any():
-                raise OutsideGridException
-            i0r = np.min(I[xcond])-1
-            i1r = np.max(I[xcond])+2
-            j0r = np.min(J[ycond])-1
-            j1r = np.max(J[ycond])+2
-            # Convert reduced indices to global indices
-            i0 = max(istep*i0r, 0)
-            i1 = min(istep*i1r, lon.shape[1]+1)
-            j0 = max(jstep*j0r, 0)
-            j1 = min(jstep*j1r, lon.shape[0]+1)
 
+            # Find containing bounds
+            i0 = max(0, np.min(I[cond])-1*istep)
+            i1 = min(np.max(I[cond])+2*istep, lon.shape[1])
+            j0 = max(0, np.min(J[cond])-1*jstep)
+            j1 = min(np.max(J[cond])+2*jstep, lon.shape[0])
+
+            # Set common origin for grid indices
+            i0 = (i0 // istep)*istep
+            i1 = min((i1 // istep + 1)*istep, lon.shape[1])
+            j0 = (j0 // jstep)*jstep
+            j1 = min((j1 // jstep + 1)*jstep, lon.shape[0])
         return (j0, j1, jstep), (i0, i1, istep)
 
     #@profile
