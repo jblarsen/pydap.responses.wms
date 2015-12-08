@@ -153,17 +153,22 @@ class WMSResponse(BaseResponse):
             location = construct_url(environ,
                     with_query_string=True,
                     querystring=dap_query)
-            # Create a Beaker cache dependent on the query string for
-            # pre-computed values that depend on the specific dataset
-            # We exclude all WMS related arguments since they don't
-            # affect the dataset.
-            self.cache = environ['beaker.cache'].get_cache(
-                    'pydap.responses.wms+' + location)
-            # We also create a global cache for pre-computed values
-            # that can be shared across datasets
-            self.global_cache = environ['beaker.cache'].get_cache(
-                    'pydap.responses.wms+global')
-            #print self.cache.namespace.keys()
+            # Check if user requests us not to cache stuff
+            wmsCache = asbool(query.get('cache', 'true'))
+            if wmsCache:
+                # Create a Beaker cache dependent on the query string for
+                # pre-computed values that depend on the specific dataset
+                # We exclude all WMS related arguments since they don't
+                # affect the dataset.
+                self.cache = environ['beaker.cache'].get_cache(
+                        'pydap.responses.wms+' + location)
+                # We also create a global cache for pre-computed values
+                # that can be shared across datasets
+                self.global_cache = environ['beaker.cache'].get_cache(
+                        'pydap.responses.wms+global')
+            else:
+                self.cache = None
+                self.global_cache = None
         except KeyError:
             self.cache = None
             self.global_cache = None
@@ -191,8 +196,9 @@ class WMSResponse(BaseResponse):
         # Check if we should return a 304 Not Modified response
         self._check_last_modified(environ)
 
-        # Set response caching headers
-        self._set_caching_headers(environ)
+        if wmsCache:
+            # Set response caching headers
+            self._set_caching_headers(environ)
 
         return BaseResponse.__call__(self, environ, start_response)
 
