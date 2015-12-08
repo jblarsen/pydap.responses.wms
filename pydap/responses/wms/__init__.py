@@ -187,6 +187,8 @@ class WMSResponse(BaseResponse):
         elif type_ == 'GetMap':
             self.serialize = self._get_map(environ)
             self.headers.append( ('Content-type', 'image/png') )
+            if not query.has_key('time'):
+                raise HTTPBadRequest('Invalid REQUEST "%s" - no time parameter' % type_)
         elif type_ == 'GetColorbar':
             self.serialize = self._get_colorbar(environ)
             self.headers.append( ('Content-type', 'image/png') )
