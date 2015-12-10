@@ -331,6 +331,7 @@ class WMSResponse(BaseResponse):
 
     def _get_actual_range(self, grid):
         try:
+            # TODO: Use file time stamp to invalidate cache
             actual_range = self.cache.get_value((grid.id, 'actual_range'))
         except (KeyError, AttributeError):
             try:
@@ -425,7 +426,8 @@ class WMSResponse(BaseResponse):
         def serialize(dataset):
             gridutils.fix_map_attributes(dataset)
             # It is apparently expensive to add an axes in matplotlib - so we cache the
-            # axes (it is pickled so it is a threadsafe copy)
+            # axes (it is pickled so it is a threadsafe copy). It is safe to store
+            # this in the cache forever
             try:
                 if not self.global_cache:
                     raise KeyError
@@ -546,6 +548,8 @@ class WMSResponse(BaseResponse):
         base_srs = 'EPSG:4326'
         do_proj = srs != base_srs
         if do_proj:
+            # We use cached versions of the projection object if possible.
+            # It is safe to store these forever.
             try:
                 if not self.global_cache:
                     raise KeyError
@@ -578,6 +582,7 @@ class WMSResponse(BaseResponse):
             lat = np.load(StringIO(lat_str))
             # Check that the dimensions match - otherwise discard
             # cached value and recalculate
+            # TODO: Check first and last values as well
             if len(lonGrid.shape) == 1:
                 shapeGrid = (latGrid.shape[0], lonGrid.shape[0])
             else:
