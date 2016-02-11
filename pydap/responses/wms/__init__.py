@@ -40,12 +40,15 @@ try:
 except:
     RestrictedInterpreter = None
 
-
 # Local imports
 from arrowbarbs import arrow_barbs
 import projutils
 import gridutils
 import plotutils
+
+# Setup caching
+from dogpile.cache import make_region
+from dogpile.cache.api import NO_VALUE
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
                  'level', 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs', 
@@ -144,13 +147,16 @@ class WMSResponse(BaseResponse):
         # Init colors class instance on first invokation
         self._init_colors(environ)
 
+        # Init redis cache on first invokation
+        self._init_cache(environ)
+
         try:
             dap_query = ['%s=%s' % (k, query[k]) for k in query
                     if k.lower() not in WMS_ARGUMENTS]
             dap_query = [pair.rstrip('=') for pair in dap_query]
             dap_query.sort()  # sort for uniqueness
             dap_query = '&'.join(dap_query)
-            location = construct_url(environ,
+            self.location = construct_url(environ,
                     with_query_string=True,
                     querystring=dap_query)
             # Check if user requests us not to cache stuff
@@ -160,18 +166,11 @@ class WMSResponse(BaseResponse):
                 # pre-computed values that depend on the specific dataset
                 # We exclude all WMS related arguments since they don't
                 # affect the dataset.
-                self.cache = environ['beaker.cache'].get_cache(
-                        'pydap.responses.wms+' + location)
-                # We also create a global cache for pre-computed values
-                # that can be shared across datasets
-                self.global_cache = environ['beaker.cache'].get_cache(
-                        'pydap.responses.wms+global')
+                self.cache = self.cacheRegion
             else:
                 self.cache = None
-                self.global_cache = None
         except KeyError:
             self.cache = None
-            self.global_cache = None
 
         # Support cross-origin resource sharing (CORS)
         self.headers.append( ('Access-Control-Allow-Origin', '*') )
@@ -247,6 +246,24 @@ class WMSResponse(BaseResponse):
                     WMSResponse.colors = colors
                 del colorfile
 
+    def _init_cache(self, environ):
+        """Set class variable "cacheRegion" on first call"""
+        if not hasattr(WMSResponse, 'cacheRegion'):
+            redis = asbool(environ.get('pydap.responses.wms.redis', 'false'))
+            if not redis:
+                WMSResponse.cacheRegion = None
+            else:
+                WMSResponse.cacheRegion = make_region().configure(
+                    'dogpile.cache.redis',
+                    arguments = {
+                        'host': environ.get('pydap.responses.wms.redis.host', 'localhost'),
+                        'port': int(environ.get('pydap.responses.wms.redis.port', 6379)),
+                        'db': int(environ.get('pydap.responses.wms.redis.db', 0)),
+                        'redis_expiration_time': int(environ.get('pydap.responses.wms.redis.redis_expiration_time', 604800)),
+                        'distributed_lock': asbool(environ.get('pydap.responses.wms.redis.distributed_lock', 'false'))
+                    }
+                )
+
     def _get_colorbar(self, environ):
         # Get query string parameters
         query = parse_dict_querystring_lower(environ)
@@ -257,9 +274,11 @@ class WMSResponse(BaseResponse):
 
         def serialize(dataset):
             # Check for cached version of colorbar
-            if self.global_cache:
+            if self.cache:
                 try:
-                    output = self.global_cache.get_value(('colorbar', cmapname))
+                    output = self.cache.get(('colorbar', cmapname))
+                    if output is NO_VALUE:
+                        raise KeyError
                     if hasattr(dataset, 'close'): dataset.close()
                     return [output]
                 except KeyError:
@@ -308,9 +327,9 @@ class WMSResponse(BaseResponse):
 
             if hasattr(dataset, 'close'): dataset.close()
             output = output.getvalue()
-            if self.global_cache:
+            if self.cache:
                 key = ('colorbar', cmapname)
-                self.global_cache.set_value(key, output)
+                self.cache.set(key, output)
 
             return [output]
 
@@ -332,7 +351,9 @@ class WMSResponse(BaseResponse):
     def _get_actual_range(self, grid):
         try:
             # TODO: Use file time stamp to invalidate cache
-            actual_range = self.cache.get_value((grid.id, 'actual_range'))
+            actual_range = self.cache.get((grid.id, 'actual_range'))
+            if actual_range is NO_VALUE:
+                raise KeyError
         except (KeyError, AttributeError):
             try:
                 actual_range = grid.attributes['actual_range']
@@ -341,7 +362,7 @@ class WMSResponse(BaseResponse):
                 actual_range = np.min(data), np.max(data)
             if self.cache:
                 key = (grid.id, 'actual_range')
-                self.cache.set_value(key, actual_range)
+                self.cache.set(key, actual_range)
         return actual_range
 
     def _get_cmap(self, name):
@@ -429,16 +450,19 @@ class WMSResponse(BaseResponse):
             # axes (it is pickled so it is a threadsafe copy). It is safe to store
             # this in the cache forever
             try:
-                if not self.global_cache:
+                if not self.cache:
                     raise KeyError
-                fig = cPickle.loads(self.global_cache.get_value((figsize, 'figure')))
+                value = self.cache.get((figsize, 'figure'))
+                if value is NO_VALUE:
+                    raise KeyError
+                fig = cPickle.loads(value)
                 ax = fig.get_axes()[0]
             except KeyError:
                 fig = Figure(figsize=figsize, dpi=dpi)
                 ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
-                if self.global_cache:
+                if self.cache:
                     key = (figsize, 'figure')
-                    self.global_cache.set_value(key, cPickle.dumps(fig))
+                    self.cache.set(key, cPickle.dumps(fig))
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
             if asbool(query.get('transparent', 'true')):
@@ -551,23 +575,27 @@ class WMSResponse(BaseResponse):
             # We use cached versions of the projection object if possible.
             # It is safe to store these forever.
             try:
-                if not self.global_cache:
+                if not self.cache:
                     raise KeyError
-                p_base = self.global_cache.get_value((base_srs, 'pyproj'))
+                p_base = self.cache.get((base_srs, 'pyproj'))
+                if p_base is NO_VALUE:
+                    raise KeyError
             except KeyError:
                 p_base = pyproj.Proj(init=base_srs)
-                if self.global_cache:
+                if self.cache:
                     key = (base_srs, 'pyproj')
-                    self.global_cache.set_value(key, p_base)
+                    self.cache.set(key, p_base)
             try:
-                if not self.global_cache:
+                if not self.cache:
                     raise KeyError
-                p_query = self.global_cache.get_value((srs, 'pyproj'))
+                p_query = self.cache.get((srs, 'pyproj'))
+                if p_query is NO_VALUE:
+                    raise KeyError
             except KeyError:
                 p_query = pyproj.Proj(init=srs)
-                if self.global_cache:
+                if self.cache:
                     key = (srs, 'pyproj')
-                    self.global_cache.set_value(key, p_query)
+                    self.cache.set(key, p_query)
         else:
             p_base = None
             p_query = None
@@ -576,8 +604,11 @@ class WMSResponse(BaseResponse):
         try:
             if not self.cache:
                 raise KeyError
-            lon_str, lat_str, dlon, do_proj = self.cache.get_value(
-                  (grid.id, srs, 'project_data'))
+            value = self.cache.get(
+                  (self.location, grid.id, srs, 'project_data'))
+            if value is NO_VALUE:
+                raise KeyError
+            lon_str, lat_str, dlon, do_proj = value
             lon = np.load(StringIO(lon_str))
             lat = np.load(StringIO(lat_str))
             # Check that the dimensions match - otherwise discard
@@ -614,8 +645,8 @@ class WMSResponse(BaseResponse):
                     np.save(lon_str, lon)
                     lat_str = StringIO()
                     np.save(lat_str, lat)
-                    key = (grid.id, srs, 'project_data')
-                    self.cache.set_value(key,
+                    key = (self.location, grid.id, srs, 'project_data')
+                    self.cache.set(key,
                          (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
 
         return lon, lat, dlon, cyclic, do_proj, p_base, p_query
@@ -839,8 +870,10 @@ class WMSResponse(BaseResponse):
             try:
                 if not self.cache:
                     raise KeyError
-                key = (grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
-                in_hull = self.cache.get_value(key)
+                key = (self.location, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                in_hull = self.cache.get(key, expiration_time=600)
+                if in_hull is NO_VALUE:
+                    raise KeyError
             except KeyError:
                 hull = ConvexHull(points)
                 vertices = np.hstack([hull.vertices, hull.vertices[0]])
@@ -855,8 +888,8 @@ class WMSResponse(BaseResponse):
                 in_hull = np.invert(in_hull)
                 if self.cache:
                     in_hull_str = StringIO()
-                    key = (grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
-                    self.cache.set_value(key, in_hull, expiretime=600)
+                    key = (self.location, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                    self.cache.set(key, in_hull)
                     
             data = []
             ny, nx = X.shape
@@ -1126,8 +1159,11 @@ class WMSResponse(BaseResponse):
                     last_modified = header[1]
             if last_modified is not None and self.cache:
                 try:
-                    key = ('capabilities', last_modified)
-                    output = self.cache.get_value(key)[:]
+                    key = ('capabilities', self.location, last_modified)
+                    output = self.cache.get(key, expiration_time=86400)
+                    if output is NO_VALUE:
+                        raise KeyError
+                    output = output[:]
                     if hasattr(dataset, 'close'): dataset.close()
                     return [output]
                 except KeyError:
@@ -1138,7 +1174,9 @@ class WMSResponse(BaseResponse):
 
             # Set global lon/lat ranges.
             try:
-                lon_range = self.cache.get_value('lon_range')
+                lon_range = self.cache.get((self.location, 'lon_range'))
+                if lon_range is NO_VALUE:
+                    raise KeyError
             except (KeyError, AttributeError):
                 try:
                     lon_range = dataset.attributes['NC_GLOBAL']['lon_range']
@@ -1149,10 +1187,12 @@ class WMSResponse(BaseResponse):
                         lon_range[0] = min(lon_range[0], np.min(lon))
                         lon_range[1] = max(lon_range[1], np.max(lon))
                 if self.cache:
-                    key = 'lon_range'
-                    self.cache.set_value(key, lon_range)
+                    key = (self.location, 'lon_range')
+                    self.cache.set(key, lon_range)
             try:
-                lat_range = self.cache.get_value('lat_range')
+                lat_range = self.cache.get((self.location, 'lat_range'))
+                if lat_range is NO_VALUE:
+                    raise KeyError
             except (KeyError, AttributeError):
                 try:
                     lat_range = dataset.attributes['NC_GLOBAL']['lat_range']
@@ -1163,8 +1203,8 @@ class WMSResponse(BaseResponse):
                         lat_range[0] = min(lat_range[0], np.min(lat))
                         lat_range[1] = max(lat_range[1], np.max(lat))
                 if self.cache:
-                    key = 'lat_range'
-                    self.cache.set_value(key, lat_range)
+                    key = (self.location, 'lat_range')
+                    self.cache.set(key, lat_range)
 
             # Remove ``REQUEST=GetCapabilites`` from query string.
             location = construct_url(environ, with_query_string=True)
@@ -1193,30 +1233,13 @@ class WMSResponse(BaseResponse):
             if hasattr(dataset, 'close'): dataset.close()
             output = output.encode('utf-8')
             if last_modified is not None and self.cache:
-                key = ('capabilities', last_modified)
-                self.cache.set_value(key, output[:], expiretime=86400)
+                key = ('capabilities', self.location, last_modified)
+                self.cache.set(key, output[:])
             return [output]
         return serialize
 
     def _get_metadata(self, environ):
         def serialize(dataset):
-            # Check for cached version of JSON document
-            last_modified = None
-            for header in environ['pydap.headers']:
-                if 'Last-modified' in header:
-                    last_modified = header[1]
-            if last_modified is not None and self.cache:
-                try:
-                    key = ('metadata_all', last_modified)
-                    output = self.cache.get_value(key)[:]
-                    if hasattr(dataset, 'close'): dataset.close()
-                    return [output]
-                except KeyError:
-                    pass
-
-            gridutils.fix_map_attributes(dataset)
-            grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
-
             # Remove ``REQUEST=GetMetadata`` from query string.
             location = construct_url(environ, with_query_string=True)
             base = location.split('?')[0].rstrip('.wms')
@@ -1227,8 +1250,45 @@ class WMSResponse(BaseResponse):
 
             output = {}
             expiretime = 86400
+            global_attrs = dataset.attributes['NC_GLOBAL']
+            if 'epoch' in items and 'epoch' in global_attrs:
+                output['epoch'] = global_attrs['epoch']
+                expiretime = 60
+            if 'last_modified' in items and last_modified is not None:
+                last_modified = datetime.fromtimestamp(
+                      time.mktime(parsedate(last_modified))). \
+                      strftime('%Y-%m-%dT%H:%M:%SZ')
+                output['last_modified'] = last_modified
+                expiretime = 60
             for layer in layers:
                 output[layer] = {}
+                if 'time' in items:
+                    tm = gridutils.get_time(dataset[layer])
+                    if tm is not None:
+                        output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
+                        expiretime = 60
+
+            # Check for cached version of JSON document
+            last_modified = None
+            for header in environ['pydap.headers']:
+                if 'Last-modified' in header:
+                    last_modified = header[1]
+            if last_modified is not None and self.cache:
+                try:
+                    key = ('metadata_all', self.location, last_modified)
+                    output = self.cache.get(key, expiration_time=expiretime)
+                    if output is NO_VALUE:
+                        raise KeyError
+                    output = output[:]
+                    if hasattr(dataset, 'close'): dataset.close()
+                    return [output]
+                except KeyError:
+                    pass
+
+            gridutils.fix_map_attributes(dataset)
+            grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
+
+            for layer in layers:
                 attrs = dataset[layer].attributes
                 # Only cache epoch, last_modified and time requests for 60 seconds
                 if 'units' in items and 'units' in attrs:
@@ -1239,17 +1299,21 @@ class WMSResponse(BaseResponse):
                     try:
                         if not self.cache:
                             raise KeyError
-                        key = ('metadata_units', layer)
-                        output[layer]['bounds'] = self.cache.get_value(key)[:]
+                        key = ('metadata_bounds', self.location, layer)
+                        output[layer]['bounds'] = self.cache.get(key,
+                                                  expiration_time=864000)
+                        if output[layer]['bounds'] is NO_VALUE:
+                            raise KeyError
+                        output[layer]['bounds'] = output[layer]['bounds'][:]
                     except KeyError:
                         lon = gridutils.get_lon(dataset[layer], dataset)
                         lat = gridutils.get_lat(dataset[layer], dataset)
                         minx, maxx = float(np.min(lon)), float(np.max(lon))
                         miny, maxy = float(np.min(lat)), float(np.max(lat))
                         output[layer]['bounds'] = [minx, miny, maxx, maxy]
+                        key = ('metadata_bounds', self.location, layer)
                         if self.cache:
-                            self.cache.set_value(key, output[layer]['bounds'],
-                                                 expiretime=864000)
+                            self.cache.set(key, output[layer]['bounds'])
                 if 'time' in items:
                     tm = gridutils.get_time(dataset[layer])
                     if tm is not None:
@@ -1268,22 +1332,12 @@ class WMSResponse(BaseResponse):
 
                 if not output[layer]:
                     del output[layer]
-            global_attrs = dataset.attributes['NC_GLOBAL']
-            if 'epoch' in items and 'epoch' in global_attrs:
-                output['epoch'] = global_attrs['epoch']
-                expiretime = 60
-            if 'last_modified' in items and last_modified is not None:
-                last_modified = datetime.fromtimestamp(
-                      time.mktime(parsedate(last_modified))). \
-                      strftime('%Y-%m-%dT%H:%M:%SZ')
-                output['last_modified'] = last_modified
-                expiretime = 60
             output = json.dumps(output)
 
             if hasattr(dataset, 'close'): dataset.close()
             if last_modified is not None and self.cache:
-                key = ('metadata_all', last_modified)
-                self.cache.set_value(key, output[:], expiretime=expiretime)
+                key = ('metadata_all', self.location, last_modified)
+                self.cache.set(key, output[:])
             return [output]
         return serialize
 
