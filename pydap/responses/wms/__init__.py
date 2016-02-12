@@ -8,6 +8,7 @@ import cPickle
 import time
 from rfc822 import parsedate
 from datetime import datetime
+from urlparse import urlparse
 
 from paste.request import construct_url, parse_dict_querystring
 from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
@@ -159,6 +160,10 @@ class WMSResponse(BaseResponse):
             self.location = construct_url(environ,
                     with_query_string=True,
                     querystring=dap_query)
+            # Since we might use different aliases for this host we only use
+            # the path component to identify the dataset
+            self.path = urlparse(self.location).path
+                
             # Check if user requests us not to cache stuff
             wmsCache = asbool(query.get('cache', 'true'))
             if wmsCache:
@@ -606,7 +611,7 @@ class WMSResponse(BaseResponse):
             if not self.cache:
                 raise KeyError
             value = self.cache.get(
-                  (self.location, grid.id, srs, 'project_data'))
+                  (self.path, grid.id, srs, 'project_data'))
             if value is NO_VALUE:
                 raise KeyError
             lon_str, lat_str, dlon, do_proj = value
@@ -646,7 +651,7 @@ class WMSResponse(BaseResponse):
                     np.save(lon_str, lon)
                     lat_str = StringIO()
                     np.save(lat_str, lat)
-                    key = (self.location, grid.id, srs, 'project_data')
+                    key = (self.path, grid.id, srs, 'project_data')
                     self.cache.set(key,
                          (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
 
@@ -872,7 +877,7 @@ class WMSResponse(BaseResponse):
             try:
                 if not self.cache:
                     raise KeyError
-                key = (self.location, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                key = (self.path, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
                 in_hull = self.cache.get(key, expiration_time=600)
                 if in_hull is NO_VALUE:
                     raise KeyError
@@ -890,7 +895,7 @@ class WMSResponse(BaseResponse):
                 in_hull = np.invert(in_hull)
                 if self.cache:
                     in_hull_str = StringIO()
-                    key = (self.location, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                    key = (self.path, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
                     self.cache.set(key, in_hull)
                     
             data = []
@@ -1161,7 +1166,7 @@ class WMSResponse(BaseResponse):
                     last_modified = header[1]
             if last_modified is not None and self.cache:
                 try:
-                    key = ('capabilities', self.location, last_modified)
+                    key = ('capabilities', self.path, last_modified)
                     output = self.cache.get(key, expiration_time=86400)
                     if output is NO_VALUE:
                         raise KeyError
@@ -1176,7 +1181,7 @@ class WMSResponse(BaseResponse):
 
             # Set global lon/lat ranges.
             try:
-                lon_range = self.cache.get((self.location, 'lon_range'))
+                lon_range = self.cache.get((self.path, 'lon_range'))
                 if lon_range is NO_VALUE:
                     raise KeyError
             except (KeyError, AttributeError):
@@ -1189,10 +1194,10 @@ class WMSResponse(BaseResponse):
                         lon_range[0] = min(lon_range[0], np.min(lon))
                         lon_range[1] = max(lon_range[1], np.max(lon))
                 if self.cache:
-                    key = (self.location, 'lon_range')
+                    key = (self.path, 'lon_range')
                     self.cache.set(key, lon_range)
             try:
-                lat_range = self.cache.get((self.location, 'lat_range'))
+                lat_range = self.cache.get((self.path, 'lat_range'))
                 if lat_range is NO_VALUE:
                     raise KeyError
             except (KeyError, AttributeError):
@@ -1205,7 +1210,7 @@ class WMSResponse(BaseResponse):
                         lat_range[0] = min(lat_range[0], np.min(lat))
                         lat_range[1] = max(lat_range[1], np.max(lat))
                 if self.cache:
-                    key = (self.location, 'lat_range')
+                    key = (self.path, 'lat_range')
                     self.cache.set(key, lat_range)
 
             # Remove ``REQUEST=GetCapabilites`` from query string.
@@ -1235,7 +1240,7 @@ class WMSResponse(BaseResponse):
             if hasattr(dataset, 'close'): dataset.close()
             output = output.encode('utf-8')
             if last_modified is not None and self.cache:
-                key = ('capabilities', self.location, last_modified)
+                key = ('capabilities', self.path, last_modified)
                 self.cache.set(key, output[:])
             return [output]
         return serialize
@@ -1282,7 +1287,7 @@ class WMSResponse(BaseResponse):
             # Check for cached version of JSON document
             if last_modified is not None and self.cache:
                 try:
-                    key = '_get_metadata+all+' + self.location
+                    key = '_get_metadata+all+' + self.path
                     output = self.cache.get(key, expiration_time=expiretime)
                     if output is NO_VALUE:
                         raise KeyError
@@ -1316,7 +1321,7 @@ class WMSResponse(BaseResponse):
                     try:
                         if not self.cache:
                             raise KeyError
-                        key = ('metadata_bounds', self.location, layer)
+                        key = ('metadata_bounds', self.path, layer)
                         output[layer]['bounds'] = self.cache.get(key,
                                                   expiration_time=864000)
                         if output[layer]['bounds'] is NO_VALUE:
@@ -1328,7 +1333,7 @@ class WMSResponse(BaseResponse):
                         minx, maxx = float(np.min(lon)), float(np.max(lon))
                         miny, maxy = float(np.min(lat)), float(np.max(lat))
                         output[layer]['bounds'] = [minx, miny, maxx, maxy]
-                        key = ('metadata_bounds', self.location, layer)
+                        key = ('metadata_bounds', self.path, layer)
                         if self.cache:
                             self.cache.set(key, output[layer]['bounds'])
                 if 'time' in items:
@@ -1358,7 +1363,7 @@ class WMSResponse(BaseResponse):
 
             if hasattr(dataset, 'close'): dataset.close()
             if last_modified is not None and self.cache:
-                key = '_get_metadata+all+' + self.location
+                key = '_get_metadata+all+' + self.path
                 self.cache.set(key, output)
             output = json.dumps(output)
             return [output]
