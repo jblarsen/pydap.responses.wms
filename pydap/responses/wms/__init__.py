@@ -878,7 +878,7 @@ class WMSResponse(BaseResponse):
                 if not self.cache:
                     raise KeyError
                 key = (self.path, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
-                in_hull = self.cache.get(key, expiration_time=600)
+                in_hull = self.cache.get(key)
                 if in_hull is NO_VALUE:
                     raise KeyError
             except KeyError:
