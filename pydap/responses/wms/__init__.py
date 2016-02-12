@@ -558,6 +558,7 @@ class WMSResponse(BaseResponse):
             return [ output.getvalue() ]
         return serialize
 
+    #@profile
     def _prepare_grid(self, srs, bbox, grid, dataset):
         """\
         Calculates various grid parameters.
@@ -651,6 +652,7 @@ class WMSResponse(BaseResponse):
 
         return lon, lat, dlon, cyclic, do_proj, p_base, p_query
 
+    #@profile
     def _find_slices(self, lon, lat, dlon, bbox, cyclic, nthin, size):
         """Returns slicing information for a given input."""
         # Retrieve only the data for the request bbox, and at the 
@@ -1239,48 +1241,61 @@ class WMSResponse(BaseResponse):
         return serialize
 
     def _get_metadata(self, environ):
+        #@profile
         def serialize(dataset):
-            # Remove ``REQUEST=GetMetadata`` from query string.
-            location = construct_url(environ, with_query_string=True)
-            base = location.split('?')[0].rstrip('.wms')
-            query = parse_dict_querystring_lower(environ)
-            layers = [layer for layer in query.get('layers', '').split(',')
-                    if layer] # or [var.id for var in walk(dataset, GridType)]
-            items = query.get('items', 'epoch').split(',')
-
-            output = {}
-            expiretime = 86400
-            global_attrs = dataset.attributes['NC_GLOBAL']
-            if 'epoch' in items and 'epoch' in global_attrs:
-                output['epoch'] = global_attrs['epoch']
-                expiretime = 60
-            if 'last_modified' in items and last_modified is not None:
-                last_modified = datetime.fromtimestamp(
-                      time.mktime(parsedate(last_modified))). \
-                      strftime('%Y-%m-%dT%H:%M:%SZ')
-                output['last_modified'] = last_modified
-                expiretime = 60
-            for layer in layers:
-                output[layer] = {}
-                if 'time' in items:
-                    tm = gridutils.get_time(dataset[layer])
-                    if tm is not None:
-                        output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
-                        expiretime = 60
-
-            # Check for cached version of JSON document
+            # Figure out when data file was last modified
             last_modified = None
             for header in environ['pydap.headers']:
                 if 'Last-modified' in header:
                     last_modified = header[1]
+
+            # Remove ``REQUEST=GetMetadata`` from query string.
+            location = construct_url(environ, with_query_string=True)
+            base = location.split('?')[0].rstrip('.wms')
+            query = parse_dict_querystring_lower(environ)
+
+            # Construct list of requested layers
+            layers = [layer for layer in query.get('layers', '').split(',')
+                      if layer]
+
+            # Construct list of requested information items
+            items = query.get('items', 'epoch').split(',')
+
+            # Decide how long an expiration time we will use. We default to
+            # one day (86400 seconds)
+            expiretime = 86400
+            global_attrs = dataset.attributes['NC_GLOBAL']
+            # Reduce expiration time when requesting epoch, last_modified
+            # or time since these values are updated when new forecasts
+            # are produced
+            if 'epoch' in items and 'epoch' in global_attrs:
+                expiretime = 60
+            elif 'last_modified' in items and last_modified is not None:
+                expiretime = 60
+            else:
+                for layer in layers:
+                    if 'time' in items:
+                        tm = gridutils.get_time(dataset[layer])
+                        if tm is not None:
+                            expiretime = 60
+
+            # Check for cached version of JSON document
             if last_modified is not None and self.cache:
                 try:
-                    key = ('metadata_all', self.location, last_modified)
+                    key = '_get_metadata+all+' + self.location
                     output = self.cache.get(key, expiration_time=expiretime)
                     if output is NO_VALUE:
                         raise KeyError
-                    output = output[:]
+                    # Only use cached version if last_modified attribute is
+                    # the same as that of the current file
+                    if 'last_modified' in items:
+                        last_modified_file = datetime.fromtimestamp(
+                              time.mktime(parsedate(last_modified))). \
+                              strftime('%Y-%m-%dT%H:%M:%SZ')
+                        if output['last_modified'] != last_modified_file:
+                            raise KeyError
                     if hasattr(dataset, 'close'): dataset.close()
+                    output = json.dumps(output)
                     return [output]
                 except KeyError:
                     pass
@@ -1288,7 +1303,9 @@ class WMSResponse(BaseResponse):
             gridutils.fix_map_attributes(dataset)
             grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
 
+            output = {}
             for layer in layers:
+                output[layer] = {}
                 attrs = dataset[layer].attributes
                 # Only cache epoch, last_modified and time requests for 60 seconds
                 if 'units' in items and 'units' in attrs:
@@ -1318,7 +1335,6 @@ class WMSResponse(BaseResponse):
                     tm = gridutils.get_time(dataset[layer])
                     if tm is not None:
                         output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
-                        expiretime = 60
                 levels = gridutils.get_vertical(dataset[layer])
                 if levels is not None and 'levels' in items:
                     output[layer]['levels'] = {}
@@ -1332,12 +1348,19 @@ class WMSResponse(BaseResponse):
 
                 if not output[layer]:
                     del output[layer]
-            output = json.dumps(output)
+            if 'epoch' in items and 'epoch' in global_attrs:
+                output['epoch'] = global_attrs['epoch']
+            if 'last_modified' in items and last_modified is not None:
+                last_modified = datetime.fromtimestamp(
+                      time.mktime(parsedate(last_modified))). \
+                      strftime('%Y-%m-%dT%H:%M:%SZ')
+                output['last_modified'] = last_modified
 
             if hasattr(dataset, 'close'): dataset.close()
             if last_modified is not None and self.cache:
-                key = ('metadata_all', self.location, last_modified)
-                self.cache.set(key, output[:])
+                key = '_get_metadata+all+' + self.location
+                self.cache.set(key, output)
+            output = json.dumps(output)
             return [output]
         return serialize
 
