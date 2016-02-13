@@ -140,6 +140,8 @@ def project_data(p_source, p_target, bbox, lon, lat, cyclic):
         if bbox[0] > bbox[2]:
         #if bbox[0] > bbox[2] or cyclic:
             x = np.where(x >= 0.0, x, x+dx)
+        x = x.astype(lon.dtype)
+        y = y.astype(lat.dtype)
     else:
         x, y = lon, lat
         dx = 360.0

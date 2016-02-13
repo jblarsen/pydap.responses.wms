@@ -457,17 +457,16 @@ class WMSResponse(BaseResponse):
             try:
                 if not self.cache:
                     raise KeyError
-                value = self.cache.get((figsize, 'figure'))
-                if value is NO_VALUE:
+                fig = self.cache.get((figsize, 'figure'))
+                if fig is NO_VALUE:
                     raise KeyError
-                fig = cPickle.loads(value)
                 ax = fig.get_axes()[0]
             except KeyError:
                 fig = Figure(figsize=figsize, dpi=dpi)
                 ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
                 if self.cache:
                     key = (figsize, 'figure')
-                    self.cache.set(key, cPickle.dumps(fig))
+                    self.cache.set(key, fig)
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
             if asbool(query.get('transparent', 'true')):
@@ -563,17 +562,10 @@ class WMSResponse(BaseResponse):
             return [ output.getvalue() ]
         return serialize
 
-    #@profile
-    def _prepare_grid(self, srs, bbox, grid, dataset):
+    def _get_proj(self, srs):
         """\
-        Calculates various grid parameters.
+        Returns projection objects.
         """
-        # Plot the data over all the extension of the bbox.
-        # First we "rewind" the data window to the begining of the bbox:
-        lonGrid = gridutils.get_lon(grid, dataset)
-        latGrid = gridutils.get_lat(grid, dataset)
-        cyclic = hasattr(lonGrid, 'modulo')
-
         # We assume that lon/lat arrays are centered on data points
         base_srs = 'EPSG:4326'
         do_proj = srs != base_srs
@@ -605,8 +597,21 @@ class WMSResponse(BaseResponse):
         else:
             p_base = None
             p_query = None
+        return do_proj, p_base, p_query
 
-        # This operation is expensive - cache results using beaker
+    #@profile
+    def _prepare_grid(self, srs, bbox, grid, dataset, return_proj):
+        """\
+        Calculates various grid parameters.
+        """
+        got_proj = False
+        # Plot the data over all the extension of the bbox.
+        # First we "rewind" the data window to the begining of the bbox:
+        lonGrid = gridutils.get_lon(grid, dataset)
+        latGrid = gridutils.get_lat(grid, dataset)
+        cyclic = hasattr(lonGrid, 'modulo')
+
+        # This operation is expensive - cache results using redis
         try:
             if not self.cache:
                 raise KeyError
@@ -614,9 +619,7 @@ class WMSResponse(BaseResponse):
                   (self.path, grid.id, srs, 'project_data'))
             if value is NO_VALUE:
                 raise KeyError
-            lon_str, lat_str, dlon, do_proj = value
-            lon = np.load(StringIO(lon_str))
-            lat = np.load(StringIO(lat_str))
+            lon, lat, dlon, do_proj = value
             # Check that the dimensions match - otherwise discard
             # cached value and recalculate
             # TODO: Check first and last values as well
@@ -632,6 +635,8 @@ class WMSResponse(BaseResponse):
             # Project data
             lon = np.asarray(lonGrid[:])
             lat = np.asarray(latGrid[:])
+            got_proj = True
+            do_proj, p_base, p_query = self._get_proj(srs)
             if not do_proj:
                 dlon = 360.0
             else:
@@ -647,15 +652,15 @@ class WMSResponse(BaseResponse):
                     lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
                                       bbox, lon, lat, cyclic)
                 if self.cache:
-                    lon_str = StringIO()
-                    np.save(lon_str, lon)
-                    lat_str = StringIO()
-                    np.save(lat_str, lat)
                     key = (self.path, grid.id, srs, 'project_data')
-                    self.cache.set(key,
-                         (lon_str.getvalue(), lat_str.getvalue(), dlon, do_proj))
+                    self.cache.set(key, (lon, lat, dlon, do_proj))
 
-        return lon, lat, dlon, cyclic, do_proj, p_base, p_query
+        if return_proj:
+            if not got_proj:
+                do_proj, p_base, p_query = self._get_proj(srs)
+            return lon, lat, dlon, cyclic, do_proj, p_base, p_query
+        else:
+            return lon, lat, dlon, cyclic
 
     #@profile
     def _find_slices(self, lon, lat, dlon, bbox, cyclic, nthin, size):
@@ -713,7 +718,7 @@ class WMSResponse(BaseResponse):
 
         elif len(lon.shape) == 2:
             i, j = np.arange(lon.shape[1]), np.arange(lon.shape[0])
-            I, J = np.meshgrid(i, j)
+            I, J = np.meshgrid(i, j, copy=False) # No copy needed
 
             # Find points within bounding box
             xcond = (lon >= bbox[0]) & (lon <= bbox[2])
@@ -741,10 +746,13 @@ class WMSResponse(BaseResponse):
             jstep = max(1, int(np.floor( (nthin_lat * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
 
             # Find containing bounds
-            i0 = max(0, np.min(I[cond])-1*istep)
-            i1 = min(np.max(I[cond])+2*istep, lon.shape[1])
-            j0 = max(0, np.min(J[cond])-1*jstep)
-            j1 = min(np.max(J[cond])+2*jstep, lon.shape[0])
+            # TODO: Performance can be improved by avoiding 2d I and J's
+            Icond = I[cond]
+            Jcond = J[cond]
+            i0 = max(0, np.min(Icond)-1*istep)
+            i1 = min(np.max(Icond)+2*istep, lon.shape[1])
+            j0 = max(0, np.min(Jcond)-1*jstep)
+            j1 = min(np.max(Jcond)+2*jstep, lon.shape[0])
 
             # Set common origin for grid indices
             i0 = (i0 // istep)*istep
@@ -850,7 +858,8 @@ class WMSResponse(BaseResponse):
 
         # Extract projected grid information
         lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
-                self._prepare_grid(srs, bbox, grids[0], dataset)
+                self._prepare_grid(srs, bbox, grids[0], dataset,
+                                   return_proj=True)
 
 
         # Now we plot the data window until the end of the bbox:
@@ -1058,8 +1067,9 @@ class WMSResponse(BaseResponse):
             return
 
         # Extract projected grid information
-        lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
-                  self._prepare_grid(srs, bbox, grid, dataset)
+        lon, lat, dlon, cyclic = \
+                  self._prepare_grid(srs, bbox, grid, dataset,
+                                     return_proj=False)
 
         # Now we plot the data window until the end of the bbox:
         while np.min(lon) < bbox[2]:
