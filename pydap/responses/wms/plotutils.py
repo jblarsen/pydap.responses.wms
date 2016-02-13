@@ -228,7 +228,8 @@ def convert_paletted_pil(canvas, ncolors=None, verbose=False):
         alpha = im.split()[-1]
         # Convert to paletted image
         im = im.convert("RGB")
-        im = im.convert("P", palette=Image.ADAPTIVE, colors=ncolors)
+        #im = im.convert("P", palette=Image.ADAPTIVE, colors=ncolors)
+        im = im.quantize(colors=ncolors, method=2, kmeans=0, palette=None)
         # Set all pixel values below ncolors to 1 and the rest to 0
         mask = Image.eval(alpha, lambda a: 255 if a <=128 else 0)
         # Paste the color of index ncolors and use alpha as a mask
