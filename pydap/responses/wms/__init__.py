@@ -30,6 +30,7 @@ rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
 rcParams['contour.negative_linestyle'] = 'solid'
 import pyproj
+from lru import LRU
 
 from pydap.model import *
 from pydap.exceptions import ServerError
@@ -268,6 +269,12 @@ class WMSResponse(BaseResponse):
                         'distributed_lock': asbool(environ.get('pydap.responses.wms.redis.distributed_lock', 'false'))
                     }
                 )
+        # Setup local caches for this process
+        if not hasattr(WMSResponse, 'localCache'):
+            WMSResponse.localCache = {}
+            WMSResponse.localCache['figures'] = LRU(1000)
+            WMSResponse.localCache['pyproj'] = LRU(1000)
+            WMSResponse.localCache['project_data'] = LRU(5)
 
     def _get_colorbar(self, environ):
         # Get query string parameters
@@ -453,20 +460,29 @@ class WMSResponse(BaseResponse):
             gridutils.fix_map_attributes(dataset)
             # It is apparently expensive to add an axes in matplotlib - so we cache the
             # axes (it is pickled so it is a threadsafe copy). It is safe to store
-            # this in the cache forever
-            try:
-                if not self.cache:
-                    raise KeyError
-                fig = self.cache.get((figsize, 'figure'))
-                if fig is NO_VALUE:
-                    raise KeyError
+            # this in the cache forever. We maintain two cache levels. The fastests
+            # is local to this process and is the "figures" dict attribute on
+            # the WMSResponse class while the second level is in the redis cache
+            
+            if 'figures' in self.localCache and figsize in self.localCache['figures'].keys():
+                fig = cPickle.loads(self.localCache['figures'][figsize])
                 ax = fig.get_axes()[0]
-            except KeyError:
-                fig = Figure(figsize=figsize, dpi=dpi)
-                ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
-                if self.cache:
-                    key = (figsize, 'figure')
-                    self.cache.set(key, fig)
+            else:
+                try:
+                    if not self.cache:
+                        raise KeyError
+                    fig = self.cache.get((figsize, 'figure'))
+                    if fig is NO_VALUE:
+                        raise KeyError
+                    ax = fig.get_axes()[0]
+                except KeyError:
+                    fig = Figure(figsize=figsize, dpi=dpi)
+                    ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+                    if self.cache:
+                        key = (figsize, 'figure')
+                        self.cache.set(key, fig)
+            if figsize not in self.localCache['figures'].keys():
+                self.localCache['figures'][figsize] = cPickle.dumps(fig, -1)
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
             if asbool(query.get('transparent', 'true')):
@@ -562,6 +578,7 @@ class WMSResponse(BaseResponse):
             return [ output.getvalue() ]
         return serialize
 
+    #@profile
     def _get_proj(self, srs):
         """\
         Returns projection objects.
@@ -569,31 +586,43 @@ class WMSResponse(BaseResponse):
         # We assume that lon/lat arrays are centered on data points
         base_srs = 'EPSG:4326'
         do_proj = srs != base_srs
+
         if do_proj:
             # We use cached versions of the projection object if possible.
             # It is safe to store these forever.
-            try:
-                if not self.cache:
-                    raise KeyError
-                p_base = self.cache.get((base_srs, 'pyproj'))
-                if p_base is NO_VALUE:
-                    raise KeyError
-            except KeyError:
-                p_base = pyproj.Proj(init=base_srs)
-                if self.cache:
-                    key = (base_srs, 'pyproj')
-                    self.cache.set(key, p_base)
-            try:
-                if not self.cache:
-                    raise KeyError
-                p_query = self.cache.get((srs, 'pyproj'))
-                if p_query is NO_VALUE:
-                    raise KeyError
-            except KeyError:
-                p_query = pyproj.Proj(init=srs)
-                if self.cache:
-                    key = (srs, 'pyproj')
-                    self.cache.set(key, p_query)
+            key = (base_srs, 'pyproj')
+            if 'pyproj' in self.localCache and key in self.localCache['pyproj'].keys():
+                p_base = self.localCache['pyproj'][key]
+            else:
+                try:
+                    if not self.cache:
+                        raise KeyError
+                    p_base = self.cache.get(key)
+                    if p_base is NO_VALUE:
+                        raise KeyError
+                except KeyError:
+                    p_base = pyproj.Proj(init=base_srs)
+                    if self.cache:
+                        self.cache.set(key, p_base)
+            if key not in self.localCache['pyproj'].keys():
+                self.localCache['pyproj'][key] = p_base
+             
+            key = (srs, 'pyproj')
+            if 'pyproj' in self.localCache and key in self.localCache['pyproj'].keys():
+                p_query = self.localCache['pyproj'][key]
+            else:
+                try:
+                    if not self.cache:
+                        raise KeyError
+                    p_query = self.cache.get(key)
+                    if p_query is NO_VALUE:
+                        raise KeyError
+                except KeyError:
+                    p_query = pyproj.Proj(init=srs)
+                    if self.cache:
+                        self.cache.set(key, p_query)
+            if key not in self.localCache['pyproj'].keys():
+                self.localCache['pyproj'][key] = p_query
         else:
             p_base = None
             p_query = None
@@ -611,49 +640,53 @@ class WMSResponse(BaseResponse):
         latGrid = gridutils.get_lat(grid, dataset)
         cyclic = hasattr(lonGrid, 'modulo')
 
-        # This operation is expensive - cache results using redis
-        try:
-            if not self.cache:
-                raise KeyError
-            value = self.cache.get(
-                  (self.path, grid.id, srs, 'project_data'))
-            if value is NO_VALUE:
-                raise KeyError
-            lon, lat, dlon, do_proj = value
-            # Check that the dimensions match - otherwise discard
-            # cached value and recalculate
-            # TODO: Check first and last values as well
-            if len(lonGrid.shape) == 1:
-                shapeGrid = (latGrid.shape[0], lonGrid.shape[0])
-            else:
-                shapeGrid = lonGrid.shape
-            if shapeGrid != lon.shape or shapeGrid != lat.shape:
-                self.cache.clear()
-                raise KeyError
-            
-        except KeyError:
-            # Project data
-            lon = np.asarray(lonGrid[:])
-            lat = np.asarray(latGrid[:])
-            got_proj = True
-            do_proj, p_base, p_query = self._get_proj(srs)
-            if not do_proj:
-                dlon = 360.0
-            else:
-                # Fetch projected data from disk if possible
-                proj_attr = 'coordinates_' + srs.replace(':', '_')
-                if proj_attr in grid.attributes:
-                    proj_coords = grid.attributes[proj_attr].split()
-                    yname, xname = proj_coords
-                    lat = np.asarray(dataset[yname])
-                    lon = np.asarray(dataset[xname])
-                    dlon = dataset[xname].attributes['modulo']
+        # This operation is expensive - cache results both locally and using
+        # redis
+        key = (self.path, grid.id, srs, 'project_data')
+        if 'project_data' in self.localCache and key in self.localCache['project_data'].keys():
+            lon, lat, dlon, do_proj = cPickle.loads(self.localCache['project_data'][key])
+        else:
+            try:
+                if not self.cache:
+                    raise KeyError
+                value = self.cache.get(key)
+                if value is NO_VALUE:
+                    raise KeyError
+                lon, lat, dlon, do_proj = value
+                # Check that the dimensions match - otherwise discard
+                # cached value and recalculate
+                # TODO: Check first and last values as well
+                if len(lonGrid.shape) == 1:
+                    shapeGrid = (latGrid.shape[0], lonGrid.shape[0])
                 else:
-                    lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
-                                      bbox, lon, lat, cyclic)
-                if self.cache:
-                    key = (self.path, grid.id, srs, 'project_data')
-                    self.cache.set(key, (lon, lat, dlon, do_proj))
+                    shapeGrid = lonGrid.shape
+                if shapeGrid != lon.shape or shapeGrid != lat.shape:
+                    self.cache.clear()
+                    raise KeyError
+            except KeyError:
+                # Project data
+                lon = np.asarray(lonGrid[:])
+                lat = np.asarray(latGrid[:])
+                got_proj = True
+                do_proj, p_base, p_query = self._get_proj(srs)
+                if not do_proj:
+                    dlon = 360.0
+                else:
+                    # Fetch projected data from disk if possible
+                    proj_attr = 'coordinates_' + srs.replace(':', '_')
+                    if proj_attr in grid.attributes:
+                        proj_coords = grid.attributes[proj_attr].split()
+                        yname, xname = proj_coords
+                        lat = np.asarray(dataset[yname])
+                        lon = np.asarray(dataset[xname])
+                        dlon = dataset[xname].attributes['modulo']
+                    else:
+                        lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
+                                          bbox, lon, lat, cyclic)
+                    if self.cache:
+                        self.cache.set(key, (lon, lat, dlon, do_proj))
+        if key not in self.localCache['project_data'].keys():
+            self.localCache['project_data'][key] = cPickle.dumps((lon, lat, dlon, do_proj), -1)
 
         if return_proj:
             if not got_proj:
