@@ -236,7 +236,7 @@ def convert_paletted_pil(canvas, ncolors=None, verbose=False):
         im.paste(ncolors, mask)
         # Truncate palette to actual size to save space
         im.palette.palette = im.palette.palette[:3*(ncolors+1)]
-        im.save(outbuffer, 'png', optimize=False, transparency=ncolors)
+        im.save(outbuffer, 'png', compress_level=7, transparency=ncolors)
     else:
         canvas.print_png(outbuffer)
     return outbuffer
