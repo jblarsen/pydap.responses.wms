@@ -6,6 +6,7 @@ import operator
 import json
 import cPickle
 import time
+import calendar
 from rfc822 import parsedate
 from datetime import datetime
 from urlparse import urlparse
@@ -214,10 +215,10 @@ class WMSResponse(BaseResponse):
         if 'HTTP_IF_MODIFIED_SINCE' in environ:
             cache_control = environ.get('HTTP_CACHE_CONTROL')
             if cache_control != 'no-cache':
-                if_modified_since = time.mktime(parsedate(environ.get('HTTP_IF_MODIFIED_SINCE')))
+                if_modified_since = calendar.timegm(parsedate(environ.get('HTTP_IF_MODIFIED_SINCE')))
                 for header in environ['pydap.headers']:
                     if 'Last-modified' in header:
-                        last_modified = time.mktime(parsedate(header[1]))
+                        last_modified = calendar.timegm(parsedate(header[1]))
                         if if_modified_since <= last_modified:
                             raise HTTPNotModified
 
@@ -1337,8 +1338,8 @@ class WMSResponse(BaseResponse):
                     # Only use cached version if last_modified attribute is
                     # the same as that of the current file
                     if 'last_modified' in items:
-                        last_modified_file = datetime.fromtimestamp(
-                              time.mktime(parsedate(last_modified))). \
+                        last_modified_file = datetime.utcfromtimestamp(
+                              calendar.timegm(parsedate(last_modified))). \
                               strftime('%Y-%m-%dT%H:%M:%SZ')
                         if output['last_modified'] != last_modified_file:
                             raise KeyError
@@ -1399,8 +1400,8 @@ class WMSResponse(BaseResponse):
             if 'epoch' in items and 'epoch' in global_attrs:
                 output['epoch'] = global_attrs['epoch']
             if 'last_modified' in items and last_modified is not None:
-                last_modified = datetime.fromtimestamp(
-                      time.mktime(parsedate(last_modified))). \
+                last_modified = datetime.utcfromtimestamp(
+                      calendar.timegm(parsedate(last_modified))). \
                       strftime('%Y-%m-%dT%H:%M:%SZ')
                 output['last_modified'] = last_modified
 
