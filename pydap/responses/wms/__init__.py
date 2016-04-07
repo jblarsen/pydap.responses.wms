@@ -12,7 +12,7 @@ from datetime import datetime
 from urlparse import urlparse
 
 from paste.request import construct_url, parse_dict_querystring
-from paste.httpexceptions import HTTPBadRequest, HTTPNotModified
+from webob.exc import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
 import numpy as np
 from scipy import interpolate
