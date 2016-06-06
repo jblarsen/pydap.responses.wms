@@ -895,6 +895,9 @@ class WMSResponse(BaseResponse):
                 self._prepare_grid(srs, bbox, grids[0], dataset,
                                    return_proj=True)
 
+        # If lon/lat arrays are 1d make them 2d
+        if len(lon.shape) == 1 and len(lat.shape) == 1:
+            lon, lat = np.meshgrid(lon, lat)
 
         # Now we plot the data window until the end of the bbox:
         cnt_window = 0
