@@ -644,9 +644,22 @@ class WMSResponse(BaseResponse):
         # This operation is expensive - cache results both locally and using
         # redis
         key = (self.path, grid.id, srs, 'project_data')
-        if 'project_data' in self.localCache and key in self.localCache['project_data'].keys():
+        try:
+            if not ('project_data' in self.localCache and
+                    key in self.localCache['project_data'].keys()):
+                raise KeyError
             lon, lat, dlon, do_proj = cPickle.loads(self.localCache['project_data'][key])
-        else:
+            # Check that the dimensions match - otherwise discard
+            # cached value and recalculate
+            # TODO: Check first and last values as well
+            if len(lonGrid.shape) == 1:
+                shapeGrid = (latGrid.shape[0], lonGrid.shape[0])
+            else:
+                shapeGrid = lonGrid.shape
+            if shapeGrid != lon.shape or shapeGrid != lat.shape:
+                del self.localCache['project_data'][key]
+                raise KeyError
+        except KeyError:
             try:
                 if not self.cache:
                     raise KeyError
