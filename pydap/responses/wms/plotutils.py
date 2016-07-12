@@ -62,7 +62,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         fig.figurePatch.set_alpha(0.0)
         ax.axesPatch.set_alpha(0.5)
 
-    if len(norm.boundaries) <= 12: # label all colors
+    if len(norm.boundaries) <= 14: # label all colors
         nb = norm.boundaries
         if center_labels:
             nb_pos = nb + (nb[1]-nb[0])*0.5
