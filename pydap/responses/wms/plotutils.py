@@ -99,10 +99,15 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
             ticks = cb.ax.get_xticklabels()
             stxt = 0
             # get total ticks text
+            newticks = []
             for tick in ticks:
-                stxt += len(tick.get_text())
+                # Substitute m-minus with hyphen-minus (n-minus)
+                newtick = tick.get_text().replace(u'\u2212', u'\u002D')
+                stxt += len(newtick)
+                newticks.append(newtick)
+            cb.ax.set_xticklabels(newticks)
             fontsize = width/(2*(stxt+5.0))
-            fontsize = max(min(12, fontsize),7)
+            fontsize = max(min(12, fontsize),6)
             for tick in cb.ax.get_xticklabels():
                 tick.set_fontsize(fontsize)
                 tick.set_color('black')
