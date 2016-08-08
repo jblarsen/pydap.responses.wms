@@ -840,6 +840,8 @@ class WMSResponse(BaseResponse):
             # The line below is a performance bottleneck.
             if gridutils.get_vertical(grid) is None:
                 gdata = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep])
+                # FIXME: Does not work for NCA's. The line below does but is inefficient
+                #gdata = np.asarray(grid.array)[l,j0:j1:jstep,i0:i1:istep]
                 if cyclic:
                     if len(lon.shape) == 1:
                         gdata = np.ma.concatenate((
@@ -1320,11 +1322,11 @@ class WMSResponse(BaseResponse):
             query = parse_dict_querystring_lower(environ)
 
             # Construct list of requested layers
-            layers = [layer for layer in query.get('layers', '').split(',')
-                      if layer]
+            layers = sorted([layer for layer in query.get('layers', '').split(',')
+                      if layer])
 
             # Construct list of requested information items
-            items = query.get('items', 'epoch').split(',')
+            items = sorted(query.get('items', 'epoch').split(','))
 
             # Decide how long an expiration time we will use. We default to
             # one day (86400 seconds)
@@ -1347,7 +1349,9 @@ class WMSResponse(BaseResponse):
             # Check for cached version of JSON document
             if last_modified is not None and self.cache:
                 try:
-                    key = '_get_metadata+all+' + self.path
+                    key = ('_get_metadata+all', self.path, 
+                           'layers=' + '+'.join(layers), 
+                           'items=' + '+'.join(items))
                     output = self.cache.get(key, expiration_time=expiretime)
                     if output is NO_VALUE:
                         raise KeyError
@@ -1423,7 +1427,9 @@ class WMSResponse(BaseResponse):
 
             if hasattr(dataset, 'close'): dataset.close()
             if last_modified is not None and self.cache:
-                key = '_get_metadata+all+' + self.path
+                key = ('_get_metadata+all', self.path, 
+                       'layers=' + '+'.join(layers), 
+                       'items=' + '+'.join(items))
                 self.cache.set(key, output)
             output = json.dumps(output)
             return [output]
