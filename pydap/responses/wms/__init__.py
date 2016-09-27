@@ -938,7 +938,8 @@ class WMSResponse(BaseResponse):
             try:
                 if not self.cache:
                     raise KeyError
-                key = (self.path, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                key = (self.path, grids[0].id, tuple(bbox), srs, cnt_window,
+                       vector_spacing, vector_offset, 'in_hull')
                 in_hull = self.cache.get(key)
                 if in_hull is NO_VALUE:
                     raise KeyError
@@ -956,7 +957,8 @@ class WMSResponse(BaseResponse):
                 in_hull = np.invert(in_hull)
                 if self.cache:
                     in_hull_str = StringIO()
-                    key = (self.path, grids[0].id, tuple(bbox), srs, cnt_window, 'in_hull')
+                    key = (self.path, grids[0].id, tuple(bbox), srs, 
+                           cnt_window, vector_spacing, vector_offset, 'in_hull')
                     self.cache.set(key, in_hull)
                     
             data = []
