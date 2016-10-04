@@ -471,12 +471,31 @@ class WMSResponse(BaseResponse):
                     elif key == 'vector_offset':
                         vector_offset = int(value)
 
+            # Construct layer list
+            layers = [layer for layer in query.get('layers', '').split(',')
+                    if layer] or [var.id for var in walk(self.dataset, GridType)]
+
+            # Check if layers are present in file and that the grid is valid
+            for layer in layers:
+                hlayers = layer.split('.')
+                vlayers = hlayers[-1].split(':')
+                for vlayer in vlayers:
+                    names = [self.dataset] + hlayers[:-2] + [vlayer]
+                    try:
+                        grid = reduce(operator.getitem, names)
+                    except KeyError as error:
+                        raise HTTPBadRequest('Nonexistent LAYER "%s"' % error.message)
+                    if not gridutils.is_valid(grid, self.dataset):
+                        raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
+
             return query, dpi, fill_method, vector_method, vector_color, time, \
                    level, figsize, bbox, cmapname, srs, styles, w, h, \
-                   nthin_fill, vector_spacing, vector_offset, allow_eval
+                   nthin_fill, vector_spacing, vector_offset, allow_eval, \
+                   layers
         query, dpi, fill_method, vector_method, vector_color, time, level, \
             figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
-            vector_spacing, vector_offset, allow_eval = prep_map(environ)
+            vector_spacing, vector_offset, allow_eval, layers \
+            = prep_map(environ)
 
         #@profile
         def serialize(dataset):
@@ -516,13 +535,11 @@ class WMSResponse(BaseResponse):
             # 255 colors.
             ncolors = None
 
-            # Plot requested grids (or all if none requested).
-            layers = [layer for layer in query.get('layers', '').split(',')
-                    if layer] or [var.id for var in walk(dataset, GridType)]
             if allow_eval:
                 expr = query.get('expr', None)
             else:
                 expr = None
+
             for layer in layers:
                 hlayers = layer.split('.')
                 vlayers = hlayers[-1].split(':')
