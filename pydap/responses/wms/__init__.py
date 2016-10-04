@@ -392,35 +392,52 @@ class WMSResponse(BaseResponse):
     #@profile
     def _get_map(self, environ):
         def prep_map(environ):
-            # Calculate appropriate figure size.
             query = parse_dict_querystring_lower(environ)
-            dpi = float(environ.get('pydap.responses.wms.dpi', 80))
-            fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
+
+            # Allow basic mathematical operations on layers
             allow_eval = asbool(environ.get('pydap.responses.wms.allow_eval', 'false'))
-            vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
+
+            # Fill method
+            fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
             assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
                                    'pcolorfast']
+
+            # Fill thinning (recommended setting: 1,1)
+            nthin_fill = map(int, 
+                environ.get('pydap.responses.wms.fill_thinning', "1,1") \
+                .split(','))
+
+            # Vector method
+            vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
+
+            # Image resolution and size
+            dpi = float(environ.get('pydap.responses.wms.dpi', 80))
             max_image_size = int(environ.get('pydap.responses.wms.max_image_size', 0))
             w = float(query.get('width', 256))
             h = float(query.get('height', 256))
-
-            # Check image size
             if max_image_size > 0 and w*h > max_image_size:
                 msg = 'Image width*height must be less than or equal to: %d' \
                       % max_image_size
                 raise HTTPBadRequest(msg)
+            figsize = w/dpi, h/dpi
 
+            # Time
             time = query.get('time')
             if time == 'current': time = None
+
+            # Vertical level
             level = int(query.get('level', 0))
-            figsize = w/dpi, h/dpi
+
+            # Bounding box in projection coordinates
             bbox = query.get('bbox', None)
             if bbox is not None:
                 bbox = [float(v) for v in bbox.split(',')]
+
             # Get colorbar name and check whether it is valid by getting it
             cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
             self._get_cmap(cmapname)
 
+            # Projection
             srs = query.get('srs', 'EPSG:4326')
             if srs == 'EPSG:900913': srs = 'EPSG:3785'
 
@@ -454,9 +471,6 @@ class WMSResponse(BaseResponse):
                     elif key == 'vector_offset':
                         vector_offset = int(value)
 
-            nthin_fill = map(int, 
-                environ.get('pydap.responses.wms.fill_thinning', "12,12") \
-                .split(','))
             return query, dpi, fill_method, vector_method, vector_color, time, \
                    level, figsize, bbox, cmapname, srs, styles, w, h, \
                    nthin_fill, vector_spacing, vector_offset, allow_eval
