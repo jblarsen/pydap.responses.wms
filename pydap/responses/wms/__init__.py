@@ -400,8 +400,16 @@ class WMSResponse(BaseResponse):
             vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
             assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
                                    'pcolorfast']
+            max_image_size = int(environ.get('pydap.responses.wms.max_image_size', 0))
             w = float(query.get('width', 256))
             h = float(query.get('height', 256))
+
+            # Check image size
+            if max_image_size > 0 and w*h > max_image_size:
+                msg = 'Image width*height must be less than or equal to: %d' \
+                      % max_image_size
+                raise HTTPBadRequest(msg)
+
             time = query.get('time')
             if time == 'current': time = None
             level = int(query.get('level', 0))
