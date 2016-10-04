@@ -675,7 +675,7 @@ class WMSResponse(BaseResponse):
                 else:
                     shapeGrid = lonGrid.shape
                 if shapeGrid != lon.shape or shapeGrid != lat.shape:
-                    self.cache.clear()
+                    self.cache.invalidate()
                     raise KeyError
             except KeyError:
                 # Project data
