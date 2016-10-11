@@ -1414,6 +1414,13 @@ class WMSResponse(BaseResponse):
             grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
 
             output = {}
+
+            # We often have the same time and bounds for different layers so we
+            # try to reuse the information from the first layer
+            # We do this caching only using the entire dimensions attribute
+            # even though we could optimize it further
+            bounds_cache = {}
+            time_cache = {}
             for layer in layers:
                 output[layer] = {}
                 attrs = dataset[layer].attributes
@@ -1433,16 +1440,26 @@ class WMSResponse(BaseResponse):
                             raise KeyError
                         output[layer]['bounds'] = output[layer]['bounds'][:]
                     except KeyError:
-                        lon = gridutils.get_lon(dataset[layer], dataset)
-                        lat = gridutils.get_lat(dataset[layer], dataset)
-                        minx, maxx = float(np.min(lon)), float(np.max(lon))
-                        miny, maxy = float(np.min(lat)), float(np.max(lat))
+                        dims = dataset[layer].dimensions
+                        if dims not in bounds_cache:
+                            lon = np.asarray(gridutils.get_lon(dataset[layer], dataset))
+                            lat = np.asarray(gridutils.get_lat(dataset[layer], dataset))
+                            minx, maxx = float(np.amin(lon)), float(np.amax(lon))
+                            miny, maxy = float(np.amin(lat)), float(np.amax(lat))
+                            bounds_cache[dims] = [minx, maxx, miny, maxy]
+                        else:
+                            minx, maxx, miny, maxy = bounds_cache[dims]
                         output[layer]['bounds'] = [minx, miny, maxx, maxy]
                         key = ('metadata_bounds', self.path, layer)
                         if self.cache:
                             self.cache.set(key, output[layer]['bounds'])
                 if 'time' in items:
-                    tm = gridutils.get_time(dataset[layer])
+                    dims = dataset[layer].dimensions
+                    if dims not in time_cache:
+                        tm = gridutils.get_time(dataset[layer])
+                        time_cache[dims] = tm
+                    else:
+                        tm = time_cache[dims]
                     if tm is not None:
                         output[layer]['time'] = [t.strftime('%Y-%m-%dT%H:%M:%SZ') for t in tm]
                 levels = gridutils.get_vertical(dataset[layer])
