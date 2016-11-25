@@ -1,5 +1,6 @@
 from __future__ import division
 
+import datetime
 import re
 import operator
 
@@ -68,7 +69,11 @@ def get_time(grid):
             calendar = dim.attributes.get('calendar', 'standard')
             try:
                 utime = netcdftime.utime(dim.units, calendar=calendar)
-                return utime.num2date(np.asarray(dim))
+                tm = utime.num2date(np.asarray(dim))
+                # Discard microseconds
+                for i in range(len(tm)):
+                    tm[i] = tm[i].replace(microsecond=0)
+                return tm
             except:
                 pass
 
@@ -197,41 +202,51 @@ def time_slice(time, grid, dataset):
     convert the entire grid time array to datetime objects we do the opposite
     and convert the requested time steps to the unit used in the grid time
     array.
+
+    If input time is None the nearest timestep is returned.
     """
-    if time is not None:
-        for dim in grid.maps.values():
-            if ' since ' in dim.attributes.get('units', ''):
-                calendar = dim.attributes.get('calendar', 'standard')
-                try:
-                    values = np.array(np.asarray(dim))
-                    break
-                except:
-                    pass
-        if len(values.shape) == 0:
-            l = Ellipsis
-        else:
-            l = np.zeros(values.shape, bool)  # get no data by default
-            tokens = time.split(',')
-            for token in tokens:
-                if '/' in token: # range
-                    start, end = token.strip().split('/')
-                    start = iso8601.parse_date(start, default_timezone=None)
-                    end = iso8601.parse_date(end, default_timezone=None)
-                    l[(values >= start) & (values <= end)] = True
-                else:
-                    instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                    utime = netcdftime.utime(dim.units, calendar=calendar)
-                    instant = utime.date2num(instant)
-                    # TODO: Calculate index directly
-                    epoch = values[0]
-                    values = values - epoch
-                    instant = instant - epoch
-                    l = np.isclose(values, instant)
-                    #l[values == instant] = True
+    if time is None:
+        find_nearest = True
     else:
+        find_nearest = False
+
+    for dim in grid.maps.values():
+        if ' since ' in dim.attributes.get('units', ''):
+            calendar = dim.attributes.get('calendar', 'standard')
+            try:
+                values = np.array(np.asarray(dim))
+                break
+            except:
+                pass
+    if len(values.shape) == 0:
+        # Input field has no time dimension
         l = Ellipsis
-    # TODO: Calculate index directly instead of array first
-    # We do not need to be able to extract multiple time steps
-    if l is not Ellipsis:
-        l = np.where(l == True)[0][0]
+    else:
+        l = np.zeros(values.shape, bool)  # get no data by default
+        if time is None:
+            time = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+        tokens = time.split(',')
+        for token in tokens:
+            if '/' in token: # range
+                start, end = token.strip().split('/')
+                start = iso8601.parse_date(start, default_timezone=None)
+                end = iso8601.parse_date(end, default_timezone=None)
+                l[(values >= start) & (values <= end)] = True
+                # Convert to index (we do not support multiple timesteps)
+                l = np.where(l == True)[0][0]
+            else:
+                instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
+                utime = netcdftime.utime(dim.units, calendar=calendar)
+                instant = utime.date2num(instant)
+                # TODO: Calculate index directly
+                epoch = values[0]
+                values = values - epoch
+                instant = instant - epoch
+                if not find_nearest:
+                    # Require almost exact match
+                    l = np.isclose(values, instant)
+                    # Convert array to index
+                    l = np.where(l == True)[0][0]
+                else:
+                    l = (np.abs(values-instant)).argmin()
     return l

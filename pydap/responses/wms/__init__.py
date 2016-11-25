@@ -112,6 +112,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
       <Title>${grid.attributes.get('long_name', grid.name)}</Title>
       <Abstract>${grid.attributes.get('history', '')}</Abstract>
       <?python
+          import datetime
           import numpy as np
           from pydap.responses.wms.gridutils import get_lon, get_lat, get_time
           lon = get_lon(grid, dataset)
@@ -119,11 +120,16 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
           time = get_time(grid)
           minx, maxx = np.min(lon), np.max(lon)
           miny, maxy = np.min(lat), np.max(lat)
+          now = datetime.datetime.utcnow()
+          epoch = datetime.datetime(1970, 1, 1)
+          now_secs = (now - epoch).total_seconds()
+          time_secs = np.array([(t-epoch).total_seconds() for t in time])
+          idx_nearest = np.abs(time_secs-now_secs).argmin()
       ?>
       <LatLonBoundingBox minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"></LatLonBoundingBox>
       <BoundingBox CRS="EPSG:4326" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
       <Dimension py:if="time is not None" name="time" units="ISO8601"/>
-      <Extent py:if="time is not None" name="time" default="${time[0].isoformat()}" nearestValue="0">${','.join([t.isoformat() for t in time])}</Extent>
+      <Extent py:if="time is not None" name="time" default="${time[idx_nearest].isoformat()}" nearestValue="0">${','.join([t.isoformat() for t in time])}</Extent>
     </Layer>
   </Layer>
 </Capability>
@@ -193,20 +199,21 @@ class WMSResponse(BaseResponse):
         elif type_ == 'GetMap':
             self.serialize = self._get_map(environ)
             self.headers.append( ('Content-type', 'image/png') )
-            if not query.has_key('time'):
-                raise HTTPBadRequest('Invalid REQUEST "%s" - no time parameter' % type_)
         elif type_ == 'GetColorbar':
             self.serialize = self._get_colorbar(environ)
             self.headers.append( ('Content-type', 'image/png') )
         else:
             raise HTTPBadRequest('Invalid REQUEST "%s"' % type_)
 
-        # Check if we should return a 304 Not Modified response
-        self._check_last_modified(environ)
+        # The GetCapabilities default time response changes with time
+        # and it is therefore not cached
+        if type_ != 'GetCapabilities':
+            # Check if we should return a 304 Not Modified response
+            self._check_last_modified(environ)
 
-        if wmsCache:
-            # Set response caching headers
-            self._set_caching_headers(environ)
+            if wmsCache:
+                # Set response caching headers
+                self._set_caching_headers(environ)
 
         return BaseResponse.__call__(self, environ, start_response)
 
@@ -422,7 +429,8 @@ class WMSResponse(BaseResponse):
             figsize = w/dpi, h/dpi
 
             # Time
-            time = query.get('time')
+            # If time is None we will use the nearest timestep available
+            time = query.get('time', None)
             if time == 'current': time = None
 
             # Vertical level
@@ -1262,6 +1270,7 @@ class WMSResponse(BaseResponse):
 
     def _get_capabilities(self, environ):
         def serialize(dataset):
+            """
             # Check for cached version of XML document
             last_modified = None
             for header in environ['pydap.headers']:
@@ -1278,6 +1287,7 @@ class WMSResponse(BaseResponse):
                     return [output]
                 except KeyError:
                     pass
+            """
 
             gridutils.fix_map_attributes(dataset)
             grids = [grid for grid in walk(dataset, GridType) if gridutils.is_valid(grid, dataset)]
@@ -1342,9 +1352,11 @@ class WMSResponse(BaseResponse):
             output = renderer.render(template, context, output_format='text/xml')
             if hasattr(dataset, 'close'): dataset.close()
             output = output.encode('utf-8')
+            """
             if last_modified is not None and self.cache:
                 key = ('capabilities', self.path, last_modified)
                 self.cache.set(key, output[:])
+            """
             return [output]
         return serialize
 
