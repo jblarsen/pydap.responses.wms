@@ -114,17 +114,29 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
       <?python
           import datetime
           import numpy as np
-          from pydap.responses.wms.gridutils import get_lon, get_lat, get_time
-          lon = get_lon(grid, dataset)
-          lat = get_lat(grid, dataset)
-          time = get_time(grid)
+          from pydap.responses.wms import gridutils
+
+          # Spatial information
+          lon = gridutils.get_lon(grid, dataset)
+          lat = gridutils.get_lat(grid, dataset)
           minx, maxx = np.min(lon), np.max(lon)
           miny, maxy = np.min(lat), np.max(lat)
+
+          # Vertical dimension
+          z = gridutils.get_vertical(grid)
+          dims = grid.dimensions
+          if z is not None:
+              if z.name not in dims:
+                  z = None
+
+          # Time information
+          time = gridutils.get_time(grid)
           now = datetime.datetime.utcnow()
           epoch = datetime.datetime(1970, 1, 1)
           now_secs = (now - epoch).total_seconds()
           time_secs = np.array([(t-epoch).total_seconds() for t in time])
           idx_nearest = np.abs(time_secs-now_secs).argmin()
+
           # Check if colormap attribute is present
           colormap = grid.attributes.get('colormap', None)
       ?>
@@ -132,6 +144,8 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
       <BoundingBox CRS="EPSG:4326" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
       <Dimension py:if="time is not None" name="time" units="ISO8601"/>
       <Extent py:if="time is not None" name="time" default="${time[idx_nearest].isoformat()}" nearestValue="0">${','.join([t.isoformat() for t in time])}</Extent>
+      <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}"/>
+      <Extent py:if="z is not None" name="elevation" default="${np.asarray(z)[0]}" multipleValues="0" nearestValue="0">${','.join([str(zz) for zz in np.asarray(z)])}</Extent>
       <Style py:if="colormap is not None">
         <Name>Default style for ${grid.name}</Name>
         <Title>Default style for ${grid.name}</Title>
