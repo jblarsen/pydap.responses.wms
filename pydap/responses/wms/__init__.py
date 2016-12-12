@@ -125,11 +125,23 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
           now_secs = (now - epoch).total_seconds()
           time_secs = np.array([(t-epoch).total_seconds() for t in time])
           idx_nearest = np.abs(time_secs-now_secs).argmin()
+          # Check if colormap attribute is present
+          colormap = grid.attributes.get('colormap', None)
       ?>
       <LatLonBoundingBox minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"></LatLonBoundingBox>
       <BoundingBox CRS="EPSG:4326" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
       <Dimension py:if="time is not None" name="time" units="ISO8601"/>
       <Extent py:if="time is not None" name="time" default="${time[idx_nearest].isoformat()}" nearestValue="0">${','.join([t.isoformat() for t in time])}</Extent>
+      <Style py:if="colormap is not None">
+        <Name>Default style for ${grid.name}</Name>
+        <Title>Default style for ${grid.name}</Title>
+        <LegendURL width="500" height="80">
+          <Format>image/png</Format>
+          <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink"
+          xlink:type="simple"
+          xlink:href="${location}.wms?REQUEST=GetColorbar&amp;STYLES=horizontal%2Cnolabel&amp;CMAP=${colormap}" />
+        </LegendURL>
+      </Style>
     </Layer>
   </Layer>
 </Capability>
