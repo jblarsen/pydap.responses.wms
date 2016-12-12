@@ -1441,6 +1441,8 @@ class WMSResponse(BaseResponse):
                     output[layer]['units'] = attrs['units']
                 if 'long_name' in items and 'long_name' in attrs:
                     output[layer]['long_name'] = attrs['long_name']
+                if 'colormap' in items and 'colormap' in attrs:
+                    output[layer]['colormap'] = attrs['colormap']
                 if 'bounds' in items:
                     try:
                         if not self.cache:
