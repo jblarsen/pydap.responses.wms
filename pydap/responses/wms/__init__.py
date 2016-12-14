@@ -53,8 +53,9 @@ import plotutils
 from dogpile.cache import make_region
 from dogpile.cache.api import NO_VALUE
 
-WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 'transparent', 'time',
-                 'level', 'styles', 'service', 'version', 'format', 'crs', 'bounds', 'srs', 
+WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 
+                 'transparent', 'time', 'level', 'vertical', 'styles',
+                 'service', 'version', 'format', 'crs', 'bounds', 'srs',
                  'expr', 'items']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
@@ -461,6 +462,9 @@ class WMSResponse(BaseResponse):
 
             # Vertical level
             level = int(query.get('level', 0))
+            vertical = query.get('vertical', None)
+            if vertical is not None:
+                vertical = float(vertical)
 
             # Bounding box in projection coordinates
             bbox = query.get('bbox', None)
