@@ -57,34 +57,37 @@ WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height',
                  'transparent', 'time', 'level', 'vertical', 'styles',
                  'service', 'version', 'format', 'crs', 'bounds', 'srs',
                  'expr', 'items']
+MAX_WIDTH=8192
+MAX_HEIGHT=8192
+DEFAULT_CRS = 'EPSG:4326'
+SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857', 'EPSG:900913', 'EPSG:3785', 'EPSG:3395']
 
-DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
-<!DOCTYPE WMT_MS_Capabilities SYSTEM "http://schemas.opengis.net/wms/1.1.1/WMS_MS_Capabilities.dtd"
- [
- <!ELEMENT VendorSpecificCapabilities EMPTY>
- ]>
-
-<WMT_MS_Capabilities version="1.1.1"
-        xmlns:wms="http://www.opengis.net/wms" 
-        xmlns:py="http://genshi.edgewall.org/"
-        xmlns:xlink="http://www.w3.org/1999/xlink">
+DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
+<WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:py="http://genshi.edgewall.org/"
+  xsi:schemaLocation="http://www.opengis.net/wms http://schemas.opengis.net/wms/1.3.0/capabilities_1_3_0.xsd">
 
 <Service>
-  <Name>${dataset.name}</Name>
-  <Title>WMS server for ${dataset.attributes.get('long_name', dataset.name)}</Title>
+  <Name>WMS</Name>
+  <Title>WMS server ${dataset.name} for ${dataset.attributes.get('long_name', dataset.name)}</Title>
   <OnlineResource xlink:href="${location + '.html'}"></OnlineResource>
+  <MaxWidth>${max_width}</MaxWidth>
+  <MaxHeight>${max_height}</MaxHeight>
 </Service>
 
 <Capability>
   <Request>
     <GetCapabilities>
-      <Format>application/vnd.ogc.wms_xml</Format>
+      <Format>text/xml</Format>
       <DCPType>
         <HTTP>
           <Get><OnlineResource xlink:href="${location + '.wms'}"></OnlineResource></Get>
         </HTTP>
       </DCPType>
     </GetCapabilities>
+
     <GetMap>
       <Format>image/png</Format>
       <DCPType>
@@ -95,19 +98,18 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
     </GetMap>
   </Request>
   <Exception>
-    <Format>application/vnd.ogc.se_blank</Format>
+    <Format>BLANK</Format>
   </Exception>
-  <VendorSpecificCapabilities></VendorSpecificCapabilities>
-  <UserDefinedSymbolization SupportSLD="1" UserLayer="0" UserStyle="1" RemoteWFS="0"/>
   <Layer>
     <Title>WMS server for ${dataset.attributes.get('long_name', dataset.name)}</Title>
-    <SRS>EPSG:4326</SRS>
-    <SRS>EPSG:3857</SRS>
-    <SRS>EPSG:900913</SRS>
-    <SRS>EPSG:3785</SRS>
-    <SRS>EPSG:3395</SRS>
-    <LatLonBoundingBox minx="${lon_range[0]}" miny="${lat_range[0]}" maxx="${lon_range[1]}" maxy="${lat_range[1]}"></LatLonBoundingBox>
-    <BoundingBox CRS="EPSG:4326" minx="${lon_range[0]}" miny="${lat_range[0]}" maxx="${lon_range[1]}" maxy="${lat_range[1]}"/>
+    <CRS py:for="crs in supported_crs">${crs}</CRS>
+    <EX_GeographicBoundingBox>
+      <westBoundLongitude>${lon_range[0]}</westBoundLongitude>
+      <eastBoundLongitude>${lon_range[1]}</eastBoundLongitude>
+      <southBoundLatitude>${lat_range[0]}</southBoundLatitude>
+      <northBoundLatitude>${lat_range[1]}</northBoundLatitude>
+    </EX_GeographicBoundingBox>
+    <BoundingBox CRS="${default_crs}" minx="${lat_range[0]}" miny="${lon_range[0]}" maxx="${lat_range[1]}" maxy="${lon_range[1]}"/>
     <Layer py:for="grid in layers">
       <Name>${grid.name}</Name>
       <Title>${grid.attributes.get('long_name', grid.name)}</Title>
@@ -141,12 +143,19 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
           # Check if colormap attribute is present
           colormap = grid.attributes.get('colormap', None)
       ?>
-      <LatLonBoundingBox minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"></LatLonBoundingBox>
-      <BoundingBox CRS="EPSG:4326" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
-      <Dimension py:if="time is not None" name="time" units="ISO8601"/>
-      <Extent py:if="time is not None" name="time" default="${time[idx_nearest].isoformat()}" nearestValue="0">${','.join([t.isoformat() for t in time])}</Extent>
-      <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}"/>
-      <Extent py:if="z is not None" name="elevation" default="${np.asarray(z)[0]}" multipleValues="0" nearestValue="0">${','.join([str(zz) for zz in np.asarray(z)])}</Extent>
+      <EX_GeographicBoundingBox>
+        <westBoundLongitude>${minx}</westBoundLongitude>
+        <eastBoundLongitude>${maxx}</eastBoundLongitude>
+        <southBoundLatitude>${miny}</southBoundLatitude>
+        <northBoundLatitude>${maxy}</northBoundLatitude>
+      </EX_GeographicBoundingBox>
+      <BoundingBox CRS="${default_crs}" minx="${miny}" miny="${minx}" maxx="${maxy}" maxy="${maxx}"/>
+      <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat()}" nearestValue="0">
+        ${','.join([t.isoformat() for t in time])}
+      </Dimension>
+      <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z)[0]}" multipleValues="0" nearestValue="0">
+        ${','.join([str(zz) for zz in np.asarray(z)])}
+      </Dimension>
       <Style py:if="colormap is not None">
         <Name>Default style for ${grid.name}</Name>
         <Title>Default style for ${grid.name}</Title>
@@ -160,7 +169,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8" standalone="no" ?>
     </Layer>
   </Layer>
 </Capability>
-</WMT_MS_Capabilities>"""
+</WMS_Capabilities>"""
 
 class OutsideGridException(Exception):
     pass
@@ -179,6 +188,7 @@ class WMSResponse(BaseResponse):
     #@profile
     def __call__(self, environ, start_response):
         query = parse_dict_querystring_lower(environ)
+        # TODO: Check if SERVICE=WMS; return exception otherwise
 
         # Init colors class instance on first invokation
         self._init_colors(environ)
@@ -428,6 +438,8 @@ class WMSResponse(BaseResponse):
         def prep_map(environ):
             query = parse_dict_querystring_lower(environ)
 
+            # TODO: Validate requested media type is image/png; throw InvalidFormat
+
             # Allow basic mathematical operations on layers
             allow_eval = asbool(environ.get('pydap.responses.wms.allow_eval', 'false'))
 
@@ -446,12 +458,11 @@ class WMSResponse(BaseResponse):
 
             # Image resolution and size
             dpi = float(environ.get('pydap.responses.wms.dpi', 80))
-            max_image_size = int(environ.get('pydap.responses.wms.max_image_size', 0))
             w = float(query.get('width', 256))
             h = float(query.get('height', 256))
-            if max_image_size > 0 and w*h > max_image_size:
-                msg = 'Image width*height must be less than or equal to: %d' \
-                      % max_image_size
+            if w > MAX_WIDTH or h > MAX_HEIGHT:
+                msg = 'Image (width, height) must be less than or equal to: (%d, %d)' \
+                      % (MAX_WIDTH, MAX_HEIGHT)
                 raise HTTPBadRequest(msg)
             figsize = w/dpi, h/dpi
 
@@ -476,8 +487,12 @@ class WMSResponse(BaseResponse):
             self._get_cmap(cmapname)
 
             # Projection
-            srs = query.get('srs', 'EPSG:4326')
+            srs = query.get('srs', DEFAULT_CRS)
             if srs == 'EPSG:900913': srs = 'EPSG:3785'
+
+            # Reorder bounding box for EPSG:4326 which has lat/lon ordering
+            if srs == 'EPSG:4326':
+                bbox = [bbox[1], bbox[0], bbox[3], bbox[2]]
 
             # Default vector settings
             vector_spacing = int(\
@@ -1367,6 +1382,10 @@ class WMSResponse(BaseResponse):
                     'layers': grids,
                     'lon_range': lon_range,
                     'lat_range': lat_range,
+                    'max_width': MAX_WIDTH,
+                    'max_height': MAX_HEIGHT,
+                    'default_crs': DEFAULT_CRS,
+                    'supported_crs': SUPPORTED_CRS
                     }
             # Load the template using the specified renderer, or fallback to the 
             # default template since most of the people won't bother installing
