@@ -1626,5 +1626,5 @@ def _plot_annotations(data, y, x, ax):
        if pltstr == '': # last one reached
            break
        ax.text(xe, ye, pltstr, color=color, ha='center', va='center',
-               fontsize=18, path_effects=[PathEffects.withStroke(linewidth=1.0,
+               fontsize=24, path_effects=[PathEffects.withStroke(linewidth=1.0,
                foreground='k')], zorder=100)
