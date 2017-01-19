@@ -3,6 +3,7 @@ import ctypes
 from cStringIO import StringIO
 
 import numpy as np
+import netCDF4
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.colorbar import ColorbarBase
@@ -257,3 +258,17 @@ def modify_contour_levels(levels, extend):
     if extend in ['max', 'neither']:
         outlevels = outlevels[1:]
     return outlevels
+
+def mslext2text(ncchars):
+    """\
+    Convert text of H and L's (high and low pressures) to TeXlike plot 
+    format
+    """
+    colors = {'H': 'blue', 'L': 'red'}
+    ncstring = str(netCDF4.chartostring(ncchars)).strip()
+    if ':' in ncstring:
+        sym, val = ncstring.split(':')
+        hlt = sym + '\n$\\regular^{\,'+val+'}}$'
+        return hlt, colors[sym]
+    return ncstring, 'black'
+

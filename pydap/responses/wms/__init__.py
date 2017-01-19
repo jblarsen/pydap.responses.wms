@@ -26,6 +26,7 @@ from matplotlib.colors import from_levels_and_colors
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.pyplot import setp
 from matplotlib.patheffects import withStroke
+import matplotlib.patheffects as PathEffects
 
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
@@ -974,6 +975,7 @@ class WMSResponse(BaseResponse):
 
         return X, Y, data
 
+
     #@profile
     def _plot_vector_grids(self, dataset, grids, tm, level, bbox, size, ax, srs,
                            vector_method, vector_color, cmapname, vector_spacing,
@@ -1313,6 +1315,27 @@ class WMSResponse(BaseResponse):
             lat = lat_save
             lon += dlon
 
+        # Check if we should plot annotations on the map
+        if 'annotations' in grid.attributes:
+            annotations = grid.attributes['annotations']
+            avar = dataset[annotations]
+            adims = avar.dimensions
+            acoords = avar.coordinates.split()
+            assert len(acoords) == 2
+            adata = np.asarray(avar[l,:,:])[:]
+            nt, nanno, nstr = adata.shape
+            assert nt == 1
+            adata = adata.reshape((nanno, nstr))
+
+            alat = np.asarray(dataset[acoords[0]][l,:])[:]
+            alon = np.asarray(dataset[acoords[1]][l,:])[:]
+            alat = alat.reshape((nanno))
+            alon = alon.reshape((nanno))
+            do_proj, p_base, p_query = self._get_proj(srs)
+            x, y = pyproj.transform(p_base, p_query, alon, alat)
+            _plot_annotations(adata, y, x, ax)
+
+
     def _get_capabilities(self, environ):
         def serialize(dataset):
             """
@@ -1593,3 +1616,13 @@ def nice_points(bbox, npoints, offset):
     xn = np.round(np.arange(x1, x2+dx, dx), decimals=6)
     yn = np.round(np.arange(y1, y2+dy, dy), decimals=6)
     return xn, yn
+
+def _plot_annotations(data, y, x, ax):
+    """Plot string variable annotations."""
+    # Loop over extrema
+    for xe, ye, te in zip(x, y, data):
+       # Extract string and color
+       pltstr, color = plotutils.mslext2text(te)
+       if pltstr == '': # last one reached
+           break
+       ax.text(xe,ye,pltstr,color=color,ha='center',va='center',fontsize=18,path_effects=[PathEffects.withStroke(linewidth=1.0, foreground='k')])
