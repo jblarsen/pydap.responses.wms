@@ -1,6 +1,9 @@
 from __future__ import division
 import ctypes
-from cStringIO import StringIO
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from io import StringIO
 
 import numpy as np
 import netCDF4

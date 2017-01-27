@@ -1,16 +1,24 @@
 from __future__ import division
 
-from cStringIO import StringIO
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from io import StringIO
 import re
 import operator
 import json
-import cPickle
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
 import time
 import calendar
-from rfc822 import parsedate
+from email.utils import parsedate
 from datetime import datetime
-from urlparse import urlparse
-
+try:
+    from urlparse import urlparse
+except ImportError:
+    from urllib.parse import urlparse
 from paste.request import construct_url, parse_dict_querystring
 from webob.exc import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
@@ -45,10 +53,10 @@ except:
     RestrictedInterpreter = None
 
 # Local imports
-from arrowbarbs import arrow_barbs
-import projutils
-import gridutils
-import plotutils
+from .arrowbarbs import arrow_barbs
+from . import projutils
+from . import gridutils
+from . import plotutils
 
 # Setup caching
 from dogpile.cache import make_region
@@ -902,7 +910,7 @@ class WMSResponse(BaseResponse):
         return (j0, j1, jstep), (i0, i1, istep)
 
     #@profile
-    def _extract_data(self, l, level, (j0, j1, jstep), (i0, i1, istep), 
+    def _extract_data(self, l, level, j0, j1, jstep, i0, i1, istep, 
                       lat, lon, dlon, cyclic, grids):
         """Returns coordinate and data arrays given slicing information."""
         # TODO: Currently we just select the first lon value for cyclic
@@ -1232,12 +1240,12 @@ class WMSResponse(BaseResponse):
                 continue
             
             if expr is None:
-                X, Y, data = self._extract_data(l, level, (j0, j1, jstep),
-                             (i0, i1, istep), lat, lon, dlon, cyclic, [grid])
+                X, Y, data = self._extract_data(l, level, j0, j1, jstep,
+                             i0, i1, istep, lat, lon, dlon, cyclic, [grid])
                 data = data[0]
             else:
-                X, Y, datas = self._extract_data(l, level, (j0, j1, jstep),
-                              (i0, i1, istep), lat, lon, dlon, cyclic, grids)
+                X, Y, datas = self._extract_data(l, level, j0, j1, jstep,
+                              i0, i1, istep, lat, lon, dlon, cyclic, grids)
                 data = datas[0]
 
             # Plot data.
