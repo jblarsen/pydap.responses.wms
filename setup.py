@@ -1,10 +1,44 @@
-try:
-    import paver.tasks
-except ImportError:
-    from os.path import exists
-    if exists("paver-minilib.zip"):
-        import sys
-        sys.path.insert(0, "paver-minilib.zip")
-    import paver.tasks
+from setuptools import setup, find_packages
+import sys, os
 
-paver.tasks.main()
+version = '0.6'
+
+install_requires=[
+    # List your project dependencies here.
+    # For more details, see:
+    # http://packages.python.org/distribute/setuptools.html#declaring-dependencies
+    'Pydap==3.2',
+    'Numpy',
+    'Paste',
+    'matplotlib',
+    'coards',
+    'iso8601',
+    'Pillow',
+]
+
+setup(version=version,
+    name='pydap.responses.wms',
+    description='WMS response for Pydap',
+    long_description='''
+Pydap is an implementation of the Opendap/DODS protocol, written from
+scratch. This response enables Pydap to serve data as a WMS server.
+    ''',
+    keywords='wms opendap dods dap data science climate oceanography meteorology',
+    classifiers=[
+      # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
+    ],
+    author='Roberto De Almeida',
+    author_email='roberto@dealmeida.net',
+    url='https://github.com/jblarsen/pydap.responses.wms',
+    license='MIT',
+    packages=find_packages('src'),
+    package_dir = {'': 'src'},
+    namespace_packages = ['pydap', 'pydap.responses'],
+    include_package_data=True,
+    zip_safe=False,
+    install_requires=install_requires,
+    entry_points="""
+        [pydap.response]
+        wms = pydap.responses.wms:WMSResponse
+    """,
+)
