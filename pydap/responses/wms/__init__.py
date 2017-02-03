@@ -141,8 +141,11 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
           time_secs = np.array([(t-epoch).total_seconds() for t in time])
           idx_nearest = np.abs(time_secs-now_secs).argmin()
 
-          # Check if colormap attribute is present
-          colormap = grid.attributes.get('colormap', None)
+          # Style information
+          standard_name = grid.attributes.get('standard_name', None)
+          styles = []
+          if standard_name is not None:
+              styles = default_styles[standard_name]
       ?>
       <EX_GeographicBoundingBox>
         <westBoundLongitude>${minx}</westBoundLongitude>
@@ -157,14 +160,14 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
       <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z)[0]}" multipleValues="0" nearestValue="0">
         ${','.join([str(zz) for zz in np.asarray(z)])}
       </Dimension>
-      <Style py:if="colormap is not None">
-        <Name>Default style for ${grid.name}</Name>
-        <Title>Default style for ${grid.name}</Title>
+      <Style py:for="style in styles">
+        <Name>contour;${style}</Name>
+        <Title>Style ${style} for ${grid.name}</Title>
         <LegendURL width="500" height="80">
           <Format>image/png</Format>
           <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink"
           xlink:type="simple"
-          xlink:href="${location}.wms?REQUEST=GetColorbar&amp;STYLES=horizontal%2Cnolabel&amp;CMAP=${colormap}" />
+          xlink:href="${location}.wms?REQUEST=GetColorbar&amp;STYLES=horizontal%2Cnolabel&amp;CMAP=${style}" />
         </LegendURL>
       </Style>
     </Layer>
@@ -191,8 +194,9 @@ class WMSResponse(BaseResponse):
         query = parse_dict_querystring_lower(environ)
         # TODO: Check if SERVICE=WMS; return exception otherwise
 
-        # Init colors class instance on first invokation
+        # Init colors and styles class instances on first invokation
         self._init_colors(environ)
+        self._init_styles(environ)
 
         # Init redis cache on first invokation
         self._init_cache(environ)
@@ -297,6 +301,17 @@ class WMSResponse(BaseResponse):
                     del levs, cols, extend, cmap, norm, cname
                     WMSResponse.colors = colors
                 del colorfile
+
+    def _init_styles(self, environ):
+        """Set class variable "styles" on first call"""
+        if not hasattr(WMSResponse, 'styles'):
+            styles_file = environ.get('pydap.responses.wms.styles_file', None)
+            if styles_file is None:
+                WMSResponse.styles = {}
+            else:
+                with open(styles_file, 'r') as file:
+                    WMSResponse.styles = json.load(file)
+                del styles_file
 
     def _init_cache(self, environ):
         """Set class variable "cacheRegion" on first call"""
@@ -1428,6 +1443,7 @@ class WMSResponse(BaseResponse):
                     'max_width': MAX_WIDTH,
                     'max_height': MAX_HEIGHT,
                     'default_crs': DEFAULT_CRS,
+                    'default_styles': self.styles,
                     'supported_crs': SUPPORTED_CRS
                     }
             # Load the template using the specified renderer, or fallback to the 
@@ -1533,8 +1549,12 @@ class WMSResponse(BaseResponse):
                     output[layer]['units'] = attrs['units']
                 if 'long_name' in items and 'long_name' in attrs:
                     output[layer]['long_name'] = attrs['long_name']
-                if 'colormap' in items and 'colormap' in attrs:
-                    output[layer]['colormap'] = attrs['colormap']
+                if 'styles' in items and 'standard_name' in attrs and \
+                   attrs['standard_name'] in self.styles:
+                    prefix = 'contour;'
+                    styles = [prefix + s for s in \
+                              self.styles[attrs['standard_name']]]
+                    output[layer]['styles'] = styles
                 if 'bounds' in items:
                     try:
                         if not self.cache:
