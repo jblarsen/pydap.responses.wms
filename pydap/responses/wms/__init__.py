@@ -55,7 +55,7 @@ from dogpile.cache import make_region
 from dogpile.cache.api import NO_VALUE
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 
-                 'transparent', 'time', 'level', 'vertical', 'styles',
+                 'transparent', 'time', 'level', 'elevation', 'styles',
                  'service', 'version', 'format', 'crs', 'bounds', 'srs',
                  'expr', 'items']
 MAX_WIDTH=8192
@@ -473,10 +473,12 @@ class WMSResponse(BaseResponse):
             if time == 'current': time = None
 
             # Vertical level
+            elevation = query.get('elevation', None)
+            if elevation is not None:
+                elevation = float(elevation)
+
+            # We support integer levels a little while longer
             level = int(query.get('level', 0))
-            vertical = query.get('vertical', None)
-            if vertical is not None:
-                vertical = float(vertical)
 
             # Bounding box in projection coordinates
             bbox = query.get('bbox', None)
@@ -543,11 +545,11 @@ class WMSResponse(BaseResponse):
                         raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
 
             return query, dpi, fill_method, vector_method, vector_color, time, \
-                   level, figsize, bbox, cmapname, srs, styles, w, h, \
-                   nthin_fill, vector_spacing, vector_offset, allow_eval, \
+                   elevation, level, figsize, bbox, cmapname, srs, styles, w, \
+                   h, nthin_fill, vector_spacing, vector_offset, allow_eval, \
                    layers
-        query, dpi, fill_method, vector_method, vector_color, time, level, \
-            figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
+        query, dpi, fill_method, vector_method, vector_color, time, elevation, \
+            level, figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
             vector_spacing, vector_offset, allow_eval, layers \
             = prep_map(environ)
 
@@ -612,7 +614,7 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         grids.append(grid)
-                    self._plot_grid(dataset, grids, time, level, bbox_local, 
+                    self._plot_grid(dataset, grids, time, elevation, level, bbox_local, 
                                     (w, h), ax, srs, fill_method, nthin_fill,
                                     cmapname, expr=expr, layers=vlayers)
                 elif len(vlayers) == 1:
@@ -626,9 +628,9 @@ class WMSResponse(BaseResponse):
                             bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
                         else:
                             bbox_local = bbox[:]
-                        self._plot_grid(dataset, grid, time, level, bbox_local,
-                                        (w, h), ax, srs, fill_method,
-                                        nthin_fill, cmapname)
+                        self._plot_grid(dataset, grid, time, elevation, level,
+                                        bbox_local, (w, h), ax, srs,
+                                        fill_method, nthin_fill, cmapname)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -644,8 +646,8 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         grids.append(grid)
-                    self._plot_vector_grids(dataset, grids, time, level,
-                        bbox_local, (w, h), ax, srs, vector_method, 
+                    self._plot_vector_grids(dataset, grids, time, elevation,
+                        level, bbox_local, (w, h), ax, srs, vector_method, 
                         vector_color, cmapname, vector_spacing, vector_offset)
                     # Force paletting of black vector plots to max 7 colors
                     # and 127 for color vectors (disabled - antialiasing is
@@ -977,9 +979,9 @@ class WMSResponse(BaseResponse):
 
 
     #@profile
-    def _plot_vector_grids(self, dataset, grids, tm, level, bbox, size, ax, srs,
-                           vector_method, vector_color, cmapname, vector_spacing,
-                           vector_offset):
+    def _plot_vector_grids(self, dataset, grids, tm, elevation, level, bbox,
+                           size, ax, srs, vector_method, vector_color, 
+                           cmapname, vector_spacing, vector_offset):
         try:
             # Slice according to time request (WMS-T).
             l = gridutils.time_slice(tm, grids[0], dataset)
@@ -987,8 +989,17 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
-        # Return empty image for vertical indices out of range
         vertical = gridutils.get_vertical(grids[0])
+        if elevation is not None:
+            vert = np.asarray(vertical[:])
+            vert_bool = np.isclose(vert, elevation)
+            if not vert_bool.any():
+                # Return empty image for requests with no corresponding
+                # vertical level
+                return
+            level = np.where(vert_bool)[0][0]
+
+        # Return empty image for vertical indices out of range
         if vertical is not None and vertical.shape[0] <= level:
             return
 
@@ -1192,8 +1203,8 @@ class WMSResponse(BaseResponse):
 
 
     #@profile
-    def _plot_grid(self, dataset, grid, time, level, bbox, size, ax, srs,
-                   fill_method, nthin=(5, 5), cmapname='jet', expr=None,
+    def _plot_grid(self, dataset, grid, time, elevation, level, bbox, size, ax,
+                   srs, fill_method, nthin=(5, 5), cmapname='jet', expr=None,
                    layers=None):
         if expr is not None:
             aeval = RestrictedInterpreter()
@@ -1209,8 +1220,17 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
-        # Return empty image for vertical indices out of range
         vertical = gridutils.get_vertical(grid)
+        if elevation is not None:
+            vert = np.asarray(vertical[:])
+            vert_bool = np.isclose(vert, elevation)
+            if not vert_bool.any():
+                # Return empty image for requests with no corresponding
+                # vertical level
+                return
+            level = np.where(vert_bool)[0][0]
+
+        # Return empty image for vertical indices out of range
         if vertical is not None and vertical.shape[0] <= level:
             return
 
