@@ -145,7 +145,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
           standard_name = grid.attributes.get('standard_name', None)
           styles = []
           if standard_name is not None:
-              styles = default_styles[standard_name]
+              styles = default_styles.get(standard_name, [])
       ?>
       <EX_GeographicBoundingBox>
         <westBoundLongitude>${minx}</westBoundLongitude>
@@ -161,7 +161,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
         ${','.join([str(zz) for zz in np.asarray(z)])}
       </Dimension>
       <Style py:for="style in styles">
-        <Name>contour;${style}</Name>
+        <Name>plot_method=contourf;legend=${style}</Name>
         <Title>Style ${style} for ${grid.name}</Title>
         <LegendURL width="500" height="80">
           <Format>image/png</Format>
@@ -482,8 +482,7 @@ class WMSResponse(BaseResponse):
                 raise HTTPBadRequest(msg)
             figsize = w/dpi, h/dpi
 
-            # Time
-            # If time is None we will use the nearest timestep available
+            # Time; if time is None we will use the nearest timestep available
             time = query.get('time', None)
             if time == 'current': time = None
 
@@ -500,10 +499,6 @@ class WMSResponse(BaseResponse):
             if bbox is not None:
                 bbox = [float(v) for v in bbox.split(',')]
 
-            # Get colorbar name and check whether it is valid by getting it
-            cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
-            self._get_cmap(cmapname)
-
             # Projection
             srs = query.get('srs', DEFAULT_CRS)
             if srs == 'EPSG:900913': srs = 'EPSG:3785'
@@ -517,30 +512,6 @@ class WMSResponse(BaseResponse):
                 environ.get('pydap.responses.wms.pixels_between_vectors', 40))
             vector_offset = 0
             vector_color = 'k' 
-
-            # Process style element
-            styles = query.get('styles', 'fill_method=' + fill_method)
-            if len(styles) > 0:
-                styles = styles.split(',')
-                for style in styles:
-                    key, value = style.split('=')
-                    if key == 'fill_method':
-                        if value in ['contour', 'contourf', 
-                                     'pcolor', 'pcolormesh',
-                                     'pcolorfast']:
-                            fill_method = value
-                    elif key == 'vector_method':
-                        if value in ['black_vector', 'black_quiver', 
-                                     'black_barbs', 'black_arrowbarbs',
-                                     'color_quiver1', 'color_quiver2',
-                                     'color_quiver3', 'color_quiver4']:
-                            vector_method = value
-                    elif key == 'vector_color':
-                        vector_color = value
-                    elif key == 'vector_spacing':
-                        vector_spacing = int(value)
-                    elif key == 'vector_offset':
-                        vector_offset = int(value)
 
             # Construct layer list
             layers = [layer for layer in query.get('layers', '').split(',')
@@ -559,12 +530,73 @@ class WMSResponse(BaseResponse):
                     if not gridutils.is_valid(grid, self.dataset):
                         raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
 
+            # Process styles element
+            styles = query.get('styles', None)
+            if styles is None:
+                msg = 'Request must include STYLES parameter'
+                raise HTTPBadRequest(msg)
+            if len(styles) > 0:
+                styles = styles.split(',')
+            else:
+                styles = len(layers)*['']
+
+            # Defaults
+            legend = environ.get('pydap.responses.wms.cmap', 'jet')
+            plot_method = 'contourf'
+
+            # FIXME: We currently only support one legend and other style params.
+            # Change to dict of layer items instead
+            for style in styles:
+                found_legend = False
+                if len(style) > 0:
+                    style_items = style.split(';')
+                    for style_item in style_items:
+                        key, value = style.split('=')
+                        if key == 'plot_method':
+                            if value in ['contour', 'contourf', 
+                                         'pcolor', 'pcolormesh',
+                                         'pcolorfast',
+                                         'black_vector', 'black_quiver', 
+                                         'black_barbs', 'black_arrowbarbs',
+                                         'color_quiver1', 'color_quiver2',
+                                         'color_quiver3', 'color_quiver4']:
+                                plot_method = value
+                        elif key == 'vector_color':
+                            vector_color = value
+                        elif key == 'vector_spacing':
+                            vector_spacing = int(value)
+                        elif key == 'vector_offset':
+                            vector_offset = int(value)
+                        elif key == 'legend':
+                            #legend = unicode(value, "utf-8")
+                            legend = value.strip()
+                            found_legend = True
+                if not found_legend:
+                    # Use defaults
+                    # FIXME: Change to use dict of layers
+                    attrs = grid.attributes
+                    if 'standard_name' in attrs and \
+                        attrs['standard_name'] in self.styles:
+                        legend = self.styles[attrs['standard_name']][0]
+
+            legend_qs = query.get('legend', None)
+            if legend_qs is not None:
+                legend = legend_qs
+
+            # Check whether legend is valid by getting it
+            self._get_cmap(legend)
+
+            if len(styles) != len(layers):
+                msg = 'STYLES and LAYERS must contain the same number of ' \
+                      'elements (STYLE can also be empty)'
+                raise HTTPBadRequest(msg)
+             
             return query, dpi, fill_method, vector_method, vector_color, time, \
-                   elevation, level, figsize, bbox, cmapname, srs, styles, w, \
+                   elevation, level, figsize, bbox, legend, srs, styles, w, \
                    h, nthin_fill, vector_spacing, vector_offset, allow_eval, \
                    layers
         query, dpi, fill_method, vector_method, vector_color, time, elevation, \
-            level, figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
+            level, figsize, bbox, legend, srs, styles, w, h, nthin_fill, \
             vector_spacing, vector_offset, allow_eval, layers \
             = prep_map(environ)
 
@@ -631,7 +663,7 @@ class WMSResponse(BaseResponse):
                         grids.append(grid)
                     self._plot_grid(dataset, grids, time, elevation, level, bbox_local, 
                                     (w, h), ax, srs, fill_method, nthin_fill,
-                                    cmapname, expr=expr, layers=vlayers)
+                                    legend, expr=expr, layers=vlayers)
                 elif len(vlayers) == 1:
                     # Plot scalar field
                     names = [dataset] + hlayers
@@ -645,7 +677,7 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         self._plot_grid(dataset, grid, time, elevation, level,
                                         bbox_local, (w, h), ax, srs,
-                                        fill_method, nthin_fill, cmapname)
+                                        fill_method, nthin_fill, legend)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -663,7 +695,7 @@ class WMSResponse(BaseResponse):
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, elevation,
                         level, bbox_local, (w, h), ax, srs, vector_method, 
-                        vector_color, cmapname, vector_spacing, vector_offset)
+                        vector_color, legend, vector_spacing, vector_offset)
                     # Force paletting of black vector plots to max 7 colors
                     # and 127 for color vectors (disabled - antialiasing is
                     # disabled for color vectors for now)
@@ -1431,6 +1463,7 @@ class WMSResponse(BaseResponse):
 
             # Remove ``REQUEST=GetCapabilites`` from query string.
             location = construct_url(environ, with_query_string=True)
+
             #base = location.split('REQUEST=')[0].rstrip('?&')
             base = location.split('?')[0].rstrip('.wms')
 
@@ -1551,7 +1584,7 @@ class WMSResponse(BaseResponse):
                     output[layer]['long_name'] = attrs['long_name']
                 if 'styles' in items and 'standard_name' in attrs and \
                    attrs['standard_name'] in self.styles:
-                    prefix = 'contour;'
+                    prefix = 'plot_method=contourf;legend='
                     styles = [prefix + s for s in \
                               self.styles[attrs['standard_name']]]
                     output[layer]['styles'] = styles
