@@ -111,58 +111,45 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
       <northBoundLatitude>${lat_range[1]}</northBoundLatitude>
     </EX_GeographicBoundingBox>
     <BoundingBox CRS="${default_crs}" minx="${lat_range[0]}" miny="${lon_range[0]}" maxx="${lat_range[1]}" maxy="${lon_range[1]}"/>
-    <Layer py:for="grid in layers">
-      <Name>${grid.name}</Name>
-      <Title>${grid.attributes.get('long_name', grid.name)}</Title>
-      <Abstract>${grid.attributes.get('history', '')}</Abstract>
+    <Layer py:for="layer in layers">
       <?python
           import datetime
           import numpy as np
-          from pydap.responses.wms import gridutils
 
-          # Spatial information
-          lon = gridutils.get_lon(grid, dataset)
-          lat = gridutils.get_lat(grid, dataset)
-          minx, maxx = np.min(lon), np.max(lon)
-          miny, maxy = np.min(lat), np.max(lat)
-
-          # Vertical dimension
-          z = gridutils.get_vertical(grid)
-          dims = grid.dimensions
-          if z is not None:
-              if z.name not in dims:
-                  z = None
+          # Unpack bounding box
+          minx, miny, maxx, maxy = layer['bounding_box']
 
           # Time information
-          time = gridutils.get_time(grid)
+          time = layer['time']
           now = datetime.datetime.utcnow()
           epoch = datetime.datetime(1970, 1, 1)
           now_secs = (now - epoch).total_seconds()
           time_secs = np.array([(t-epoch).total_seconds() for t in time])
           idx_nearest = np.abs(time_secs-now_secs).argmin()
 
-          # Style information
-          standard_name = grid.attributes.get('standard_name', None)
-          styles = []
-          if standard_name is not None:
-              styles = default_styles.get(standard_name, [])
+          # Vertical coordinate variable
+          z = layer['vertical']
       ?>
+
+      <Name>${layer['name']}</Name>
+      <Title>${layer['title']}</Title>
+      <Abstract>${layer['abstract']}</Abstract>
       <EX_GeographicBoundingBox>
         <westBoundLongitude>${minx}</westBoundLongitude>
         <eastBoundLongitude>${maxx}</eastBoundLongitude>
         <southBoundLatitude>${miny}</southBoundLatitude>
         <northBoundLatitude>${maxy}</northBoundLatitude>
       </EX_GeographicBoundingBox>
-      <BoundingBox CRS="${default_crs}" minx="${miny}" miny="${minx}" maxx="${maxy}" maxy="${maxx}"/>
+      <BoundingBox CRS="${default_crs}" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
       <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat()}" nearestValue="0">
         ${','.join([t.isoformat() for t in time])}
       </Dimension>
       <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z)[0]}" multipleValues="0" nearestValue="0">
         ${','.join([str(zz) for zz in np.asarray(z)])}
       </Dimension>
-      <Style py:for="style in styles">
+      <Style py:for="style in layer['styles']">
         <Name>plot_method=contourf;legend=${style}</Name>
-        <Title>Style ${style} for ${grid.name}</Title>
+        <Title>Style ${style} for ${layer['name']}</Title>
         <LegendURL width="500" height="80">
           <Format>image/png</Format>
           <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -1467,10 +1454,48 @@ class WMSResponse(BaseResponse):
             #base = location.split('REQUEST=')[0].rstrip('?&')
             base = location.split('?')[0].rstrip('.wms')
 
+            # Constructing information needed for document
+            layers = []
+            for grid in grids:
+                # Style information
+                standard_name = grid.attributes.get('standard_name', None)
+                styles = []
+                if standard_name is not None:
+                    styles = self.styles.get(standard_name, [])
+
+                # Spatial information
+                lon = gridutils.get_lon(grid, dataset)
+                lat = gridutils.get_lat(grid, dataset)
+                minx, maxx = np.min(lon), np.max(lon)
+                miny, maxy = np.min(lat), np.max(lat)
+                bbox = [minx, miny, maxx, maxy]
+
+                # Vertical dimension
+                z = gridutils.get_vertical(grid)
+                dims = grid.dimensions
+                if z is not None:
+                    if z.name not in dims:
+                        z = None
+
+                # Time information
+                time = gridutils.get_time(grid)
+
+                layer = {
+                    'name': grid.name,
+                    'title': grid.attributes.get('long_name', grid.name),
+                    'abstract': grid.attributes.get('history', ''),
+                    'styles': styles,
+                    'bounding_box': bbox,
+                    'vertical': z,
+                    'time': time
+                }
+                layers.append(layer)
+                 
+
             context = {
                     'dataset': dataset,
                     'location': base,
-                    'layers': grids,
+                    'layers': layers,
                     'lon_range': lon_range,
                     'lat_range': lat_range,
                     'max_width': MAX_WIDTH,
