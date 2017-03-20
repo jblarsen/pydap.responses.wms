@@ -10,6 +10,7 @@ import calendar
 from rfc822 import parsedate
 from datetime import datetime
 from urlparse import urlparse
+import urllib
 
 from paste.request import construct_url, parse_dict_querystring
 from webob.exc import HTTPBadRequest, HTTPNotModified
@@ -57,7 +58,7 @@ from dogpile.cache.api import NO_VALUE
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 
                  'transparent', 'time', 'level', 'elevation', 'styles',
                  'service', 'version', 'format', 'crs', 'bounds', 'srs',
-                 'expr', 'items']
+                 'expr', 'items', 'size']
 MAX_WIDTH=8192
 MAX_HEIGHT=8192
 DEFAULT_CRS = 'EPSG:4326'
@@ -148,13 +149,20 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
         ${','.join([str(zz) for zz in np.asarray(z)])}
       </Dimension>
       <Style py:for="style in layer['styles']">
-        <Name>plot_method=contourf;legend=${style}</Name>
-        <Title>Style ${style} for ${layer['name']}</Title>
-        <LegendURL width="500" height="80">
+        <?python
+            style_list = []
+            for key, value in style.iteritems():
+                item = key + '%3D' + value
+                style_list.append(item)
+            style_str = '%3B'.join(style_list)
+        ?>
+        <Name>${style_str}</Name>
+        <Title>Style ${style_str} for ${layer['name']}</Title>
+        <LegendURL width="250" height="40">
           <Format>image/png</Format>
           <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink"
           xlink:type="simple"
-          xlink:href="${location}.wms?REQUEST=GetColorbar&amp;STYLES=horizontal%2Cnolabel&amp;CMAP=${style}" />
+          xlink:href="${location}.wms?REQUEST=GetColorbar&amp;STYLES=horizontal%2Cnolabel&amp;CMAP=${style['legend']}&amp;SIZE=250" />
         </LegendURL>
       </Style>
     </Layer>
@@ -332,6 +340,13 @@ class WMSResponse(BaseResponse):
         cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
         self._get_cmap(cmapname)
 
+        # Scale DPI according to size
+        size = int(query.get('size', 0))
+        if size < 25 or size > min(MAX_WIDTH, MAX_HEIGHT):
+            msg = 'Image size must be in range [25; %d]' \
+                  % min(MAX_WIDTH, MAX_HEIGHT)
+            raise HTTPBadRequest(msg)
+
         def serialize(dataset):
             # Check for cached version of colorbar
             if self.cache:
@@ -370,6 +385,12 @@ class WMSResponse(BaseResponse):
             if orientation == 'horizontal':
                 w, h = 500, 80
 
+            if size != 0:
+                wh_max = max(w, h)
+                dpi = size/wh_max*dpi
+                w = int(size/wh_max*w)
+                h = int(size/wh_max*h)
+
             gridutils.fix_map_attributes(dataset)
 
             # Plot requested grids.
@@ -387,9 +408,10 @@ class WMSResponse(BaseResponse):
 
             if hasattr(dataset, 'close'): dataset.close()
             output = output.getvalue()
+            # FIXME: We should use all parameters for caching
             if self.cache:
                 key = ('colorbar', cmapname)
-                self.cache.set(key, output)
+                #self.cache.set(key, output)
 
             return [output]
 
@@ -446,18 +468,13 @@ class WMSResponse(BaseResponse):
             # Allow basic mathematical operations on layers
             allow_eval = asbool(environ.get('pydap.responses.wms.allow_eval', 'false'))
 
-            # Fill method
-            fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
-            assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
-                                   'pcolorfast']
-
             # Fill thinning (recommended setting: 1,1)
             nthin_fill = map(int, 
                 environ.get('pydap.responses.wms.fill_thinning', "1,1") \
                 .split(','))
 
             # Vector method
-            vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
+            #vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
 
             # Image resolution and size
             dpi = float(environ.get('pydap.responses.wms.dpi', 80))
@@ -522,6 +539,7 @@ class WMSResponse(BaseResponse):
             if styles is None:
                 msg = 'Request must include STYLES parameter'
                 raise HTTPBadRequest(msg)
+            styles = urllib.unquote(styles)
             if len(styles) > 0:
                 styles = styles.split(',')
             else:
@@ -538,7 +556,7 @@ class WMSResponse(BaseResponse):
                 if len(style) > 0:
                     style_items = style.split(';')
                     for style_item in style_items:
-                        key, value = style.split('=')
+                        key, value = style_item.split('=')
                         if key == 'plot_method':
                             if value in ['contour', 'contourf', 
                                          'pcolor', 'pcolormesh',
@@ -564,7 +582,7 @@ class WMSResponse(BaseResponse):
                     attrs = grid.attributes
                     if 'standard_name' in attrs and \
                         attrs['standard_name'] in self.styles:
-                        legend = self.styles[attrs['standard_name']][0]
+                        legend = self.styles[attrs['standard_name']][0]['legend']
 
             legend_qs = query.get('legend', None)
             if legend_qs is not None:
@@ -578,11 +596,12 @@ class WMSResponse(BaseResponse):
                       'elements (STYLE can also be empty)'
                 raise HTTPBadRequest(msg)
              
-            return query, dpi, fill_method, vector_method, vector_color, time, \
+            return query, dpi, plot_method, vector_color, time, \
                    elevation, level, figsize, bbox, legend, srs, styles, w, \
                    h, nthin_fill, vector_spacing, vector_offset, allow_eval, \
                    layers
-        query, dpi, fill_method, vector_method, vector_color, time, elevation, \
+
+        query, dpi, plot_method, vector_color, time, elevation, \
             level, figsize, bbox, legend, srs, styles, w, h, nthin_fill, \
             vector_spacing, vector_offset, allow_eval, layers \
             = prep_map(environ)
@@ -649,7 +668,7 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         grids.append(grid)
                     self._plot_grid(dataset, grids, time, elevation, level, bbox_local, 
-                                    (w, h), ax, srs, fill_method, nthin_fill,
+                                    (w, h), ax, srs, plot_method, nthin_fill,
                                     legend, expr=expr, layers=vlayers)
                 elif len(vlayers) == 1:
                     # Plot scalar field
@@ -664,7 +683,7 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         self._plot_grid(dataset, grid, time, elevation, level,
                                         bbox_local, (w, h), ax, srs,
-                                        fill_method, nthin_fill, legend)
+                                        plot_method, nthin_fill, legend)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -681,13 +700,13 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, elevation,
-                        level, bbox_local, (w, h), ax, srs, vector_method, 
+                        level, bbox_local, (w, h), ax, srs, plot_method, 
                         vector_color, legend, vector_spacing, vector_offset)
                     # Force paletting of black vector plots to max 7 colors
                     # and 127 for color vectors (disabled - antialiasing is
                     # disabled for color vectors for now)
-                    if vector_method in ['black_vector', 'black_quiver', 
-                                         'black_barbs', 'black_arrowbarbs']:
+                    if plot_method in ['black_vector', 'black_quiver', 
+                                       'black_barbs', 'black_arrowbarbs']:
                         ncolors = 7
                     #else:
                     #    ncolors = 127
@@ -1454,7 +1473,7 @@ class WMSResponse(BaseResponse):
             #base = location.split('REQUEST=')[0].rstrip('?&')
             base = location.split('?')[0].rstrip('.wms')
 
-            # Constructing information needed for document
+            # Store information for regular layers
             layers = []
             for grid in grids:
                 # Style information
@@ -1491,6 +1510,45 @@ class WMSResponse(BaseResponse):
                 }
                 layers.append(layer)
                  
+            # Find and store information for vector layers
+            for u_grid in grids:
+                u_standard_name = u_grid.attributes.get('standard_name', None)
+                if u_standard_name.startswith('eastward_'):
+                    postfix = u_standard_name.split('_', 1)[1]
+                    standard_name = 'northward_' + postfix
+                    for v_grid in grids:
+                        v_standard_name = v_grid.attributes.get(
+                                          'standard_name', None)
+                        if standard_name == v_standard_name:
+                            styles = self.styles.get(postfix, [])
+
+                            # Spatial information
+                            lon = gridutils.get_lon(u_grid, dataset)
+                            lat = gridutils.get_lat(u_grid, dataset)
+                            minx, maxx = np.min(lon), np.max(lon)
+                            miny, maxy = np.min(lat), np.max(lat)
+                            bbox = [minx, miny, maxx, maxy]
+
+                            # Vertical dimension
+                            z = gridutils.get_vertical(u_grid)
+                            dims = u_grid.dimensions
+                            if z is not None:
+                                if z.name not in dims:
+                                    z = None
+
+                            # Time information
+                            time = gridutils.get_time(u_grid)
+
+                            layer = {
+                                'name': ':'.join([u_grid.name, v_grid.name]),
+                                'title': postfix,
+                                'abstract': grid.attributes.get('history', ''),
+                                'styles': styles,
+                                'bounding_box': bbox,
+                                'vertical': z,
+                                'time': time
+                            }
+                            layers.append(layer)
 
             context = {
                     'dataset': dataset,
@@ -1609,10 +1667,7 @@ class WMSResponse(BaseResponse):
                     output[layer]['long_name'] = attrs['long_name']
                 if 'styles' in items and 'standard_name' in attrs and \
                    attrs['standard_name'] in self.styles:
-                    prefix = 'plot_method=contourf;legend='
-                    styles = [prefix + s for s in \
-                              self.styles[attrs['standard_name']]]
-                    output[layer]['styles'] = styles
+                    output[layer]['styles'] = self.styles[attrs['standard_name']]
                 if 'bounds' in items:
                     try:
                         if not self.cache:
