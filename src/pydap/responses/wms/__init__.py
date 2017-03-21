@@ -20,6 +20,8 @@ try:
 except ImportError:
     from urllib.parse import urlparse
 from paste.request import construct_url, parse_dict_querystring
+from webob import Response
+from webob.dec import wsgify
 from webob.exc import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
 import numpy as np
@@ -195,7 +197,9 @@ class WMSResponse(BaseResponse):
         self.headers.append( ('Content-description', 'dods_wms') )
 
     #@profile
-    def __call__(self, environ, start_response):
+    @wsgify
+    def __call__(self, req):
+        environ = req.environ
         query = parse_dict_querystring_lower(environ)
         # TODO: Check if SERVICE=WMS; return exception otherwise
 
@@ -237,16 +241,16 @@ class WMSResponse(BaseResponse):
         # Handle GetMap, GetColorbar, GetCapabilities and GetMetadata requests
         type_ = query.get('request', 'GetMap')
         if type_ == 'GetCapabilities':
-            self.serialize = self._get_capabilities(environ)
+            content = self._get_capabilities(environ)
             self.headers.append( ('Content-type', 'text/xml') )
         elif type_ == 'GetMetadata':
-            self.serialize = self._get_metadata(environ)
+            content = self._get_metadata(environ)
             self.headers.append( ('Content-type', 'application/json; charset=utf-8') )
         elif type_ == 'GetMap':
-            self.serialize = self._get_map(environ)
+            content = self._get_map(environ)
             self.headers.append( ('Content-type', 'image/png') )
         elif type_ == 'GetColorbar':
-            self.serialize = self._get_colorbar(environ)
+            content = self._get_colorbar(environ)
             self.headers.append( ('Content-type', 'image/png') )
         else:
             raise HTTPBadRequest('Invalid REQUEST "%s"' % type_)
@@ -261,7 +265,7 @@ class WMSResponse(BaseResponse):
                 # Set response caching headers
                 self._set_caching_headers(environ)
 
-        return BaseResponse.__call__(self, environ, start_response)
+        return Response(body=content[0], headers=self.headers)
 
     def _check_last_modified(self, environ):
         """Check if resource is modified since last_modified header value."""
@@ -399,7 +403,7 @@ class WMSResponse(BaseResponse):
 
             return [output]
 
-        return serialize
+        return serialize(self.dataset)
 
     def _get_colors(self, cmapname, grid):
         """Returns Normalization, Colormap and extend information."""
@@ -678,7 +682,7 @@ class WMSResponse(BaseResponse):
                 canvas.print_png(output)
             if hasattr(dataset, 'close'): dataset.close()
             return [ output.getvalue() ]
-        return serialize
+        return serialize(self.dataset)
 
     #@profile
     def _get_proj(self, srs):
@@ -1438,7 +1442,7 @@ class WMSResponse(BaseResponse):
                 self.cache.set(key, output[:])
             """
             return [output]
-        return serialize
+        return serialize(self.dataset)
 
     def _get_metadata(self, environ):
         #@profile
@@ -1585,7 +1589,7 @@ class WMSResponse(BaseResponse):
                 self.cache.set(key, output)
             output = json.dumps(output)
             return [output]
-        return serialize
+        return serialize(self.dataset)
 
 def parse_dict_querystring_lower(environ):
     """Parses query string into dict with keys in lower case."""
