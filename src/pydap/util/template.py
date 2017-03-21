@@ -151,7 +151,10 @@ class StringSource(object):
         self.template = template
 
     def open(self):
-        from StringIO import StringIO
+        try:
+            from StringIO import StringIO
+        except ImportError:
+            from io import StringIO
         return StringIO(self.template)
 
     def unicode_contents(self):
