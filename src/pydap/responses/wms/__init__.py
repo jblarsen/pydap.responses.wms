@@ -19,6 +19,10 @@ try:
     from urlparse import urlparse
 except ImportError:
     from urllib.parse import urlparse
+try:
+    from urllib.parse import unquote
+except ImportError:
+    from urllib import unquote
 from paste.request import construct_url, parse_dict_querystring
 from webob import Response
 from webob.dec import wsgify
@@ -65,9 +69,9 @@ from dogpile.cache import make_region
 from dogpile.cache.api import NO_VALUE
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 
-                 'transparent', 'time', 'level', 'vertical', 'styles',
+                 'transparent', 'time', 'level', 'elevation', 'styles',
                  'service', 'version', 'format', 'crs', 'bounds', 'srs',
-                 'expr', 'items']
+                 'expr', 'items', 'size']
 MAX_WIDTH=8192
 MAX_HEIGHT=8192
 DEFAULT_CRS = 'EPSG:4326'
@@ -121,60 +125,57 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
       <northBoundLatitude>${lat_range[1]}</northBoundLatitude>
     </EX_GeographicBoundingBox>
     <BoundingBox CRS="${default_crs}" minx="${lat_range[0]}" miny="${lon_range[0]}" maxx="${lat_range[1]}" maxy="${lon_range[1]}"/>
-    <Layer py:for="grid in layers">
-      <Name>${grid.name}</Name>
-      <Title>${grid.attributes.get('long_name', grid.name)}</Title>
-      <Abstract>${grid.attributes.get('history', '')}</Abstract>
+    <Layer py:for="layer in layers">
       <?python
           import datetime
           import numpy as np
-          from pydap.responses.wms import gridutils
 
-          # Spatial information
-          lon = gridutils.get_lon(grid, dataset)
-          lat = gridutils.get_lat(grid, dataset)
-          minx, maxx = np.min(lon), np.max(lon)
-          miny, maxy = np.min(lat), np.max(lat)
-
-          # Vertical dimension
-          z = gridutils.get_vertical(grid)
-          dims = grid.dimensions
-          if z is not None:
-              if z.name not in dims:
-                  z = None
+          # Unpack bounding box
+          minx, miny, maxx, maxy = layer['bounding_box']
 
           # Time information
-          time = gridutils.get_time(grid)
+          time = layer['time']
           now = datetime.datetime.utcnow()
           epoch = datetime.datetime(1970, 1, 1)
           now_secs = (now - epoch).total_seconds()
           time_secs = np.array([(t-epoch).total_seconds() for t in time])
           idx_nearest = np.abs(time_secs-now_secs).argmin()
 
-          # Check if colormap attribute is present
-          colormap = grid.attributes.get('colormap', None)
+          # Vertical coordinate variable
+          z = layer['vertical']
       ?>
+
+      <Name>${layer['name']}</Name>
+      <Title>${layer['title']}</Title>
+      <Abstract>${layer['abstract']}</Abstract>
       <EX_GeographicBoundingBox>
         <westBoundLongitude>${minx}</westBoundLongitude>
         <eastBoundLongitude>${maxx}</eastBoundLongitude>
         <southBoundLatitude>${miny}</southBoundLatitude>
         <northBoundLatitude>${maxy}</northBoundLatitude>
       </EX_GeographicBoundingBox>
-      <BoundingBox CRS="${default_crs}" minx="${miny}" miny="${minx}" maxx="${maxy}" maxy="${maxx}"/>
+      <BoundingBox CRS="${default_crs}" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
       <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat()}" nearestValue="0">
         ${','.join([t.isoformat() for t in time])}
       </Dimension>
       <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z)[0]}" multipleValues="0" nearestValue="0">
         ${','.join([str(zz) for zz in np.asarray(z)])}
       </Dimension>
-      <Style py:if="colormap is not None">
-        <Name>Default style for ${grid.name}</Name>
-        <Title>Default style for ${grid.name}</Title>
-        <LegendURL width="500" height="80">
+      <Style py:for="style in layer['styles']">
+        <?python
+            style_list = []
+            for key, value in style.iteritems():
+                item = key + '%3D' + value
+                style_list.append(item)
+            style_str = '%3B'.join(style_list)
+        ?>
+        <Name>${style_str}</Name>
+        <Title>Style ${style_str} for ${layer['name']}</Title>
+        <LegendURL width="250" height="40">
           <Format>image/png</Format>
           <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink"
           xlink:type="simple"
-          xlink:href="${location}.wms?REQUEST=GetColorbar&amp;STYLES=horizontal%2Cnolabel&amp;CMAP=${colormap}" />
+          xlink:href="${location}.wms?REQUEST=GetColorbar&amp;STYLES=horizontal%2Cnolabel&amp;CMAP=${style['legend']}&amp;SIZE=250" />
         </LegendURL>
       </Style>
     </Layer>
@@ -203,8 +204,9 @@ class WMSResponse(BaseResponse):
         query = parse_dict_querystring_lower(environ)
         # TODO: Check if SERVICE=WMS; return exception otherwise
 
-        # Init colors class instance on first invokation
+        # Init colors and styles class instances on first invokation
         self._init_colors(environ)
+        self._init_styles(environ)
 
         # Init redis cache on first invokation
         self._init_cache(environ)
@@ -310,6 +312,17 @@ class WMSResponse(BaseResponse):
                     WMSResponse.colors = colors
                 del colorfile
 
+    def _init_styles(self, environ):
+        """Set class variable "styles" on first call"""
+        if not hasattr(WMSResponse, 'styles'):
+            styles_file = environ.get('pydap.responses.wms.styles_file', None)
+            if styles_file is None:
+                WMSResponse.styles = {}
+            else:
+                with open(styles_file, 'r') as file:
+                    WMSResponse.styles = json.load(file)
+                del styles_file
+
     def _init_cache(self, environ):
         """Set class variable "cacheRegion" on first call"""
         if not hasattr(WMSResponse, 'cacheRegion'):
@@ -341,6 +354,13 @@ class WMSResponse(BaseResponse):
         # Get colorbar name and check whether it is valid
         cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
         self._get_cmap(cmapname)
+
+        # Scale DPI according to size
+        size = int(query.get('size', 0))
+        if size < 25 or size > min(MAX_WIDTH, MAX_HEIGHT):
+            msg = 'Image size must be in range [25; %d]' \
+                  % min(MAX_WIDTH, MAX_HEIGHT)
+            raise HTTPBadRequest(msg)
 
         def serialize(dataset):
             # Check for cached version of colorbar
@@ -380,6 +400,12 @@ class WMSResponse(BaseResponse):
             if orientation == 'horizontal':
                 w, h = 500, 80
 
+            if size != 0:
+                wh_max = max(w, h)
+                dpi = size/wh_max*dpi
+                w = int(size/wh_max*w)
+                h = int(size/wh_max*h)
+
             gridutils.fix_map_attributes(dataset)
 
             # Plot requested grids.
@@ -397,9 +423,10 @@ class WMSResponse(BaseResponse):
 
             if hasattr(dataset, 'close'): dataset.close()
             output = output.getvalue()
+            # FIXME: We should use all parameters for caching
             if self.cache:
                 key = ('colorbar', cmapname)
-                self.cache.set(key, output)
+                #self.cache.set(key, output)
 
             return [output]
 
@@ -456,18 +483,13 @@ class WMSResponse(BaseResponse):
             # Allow basic mathematical operations on layers
             allow_eval = asbool(environ.get('pydap.responses.wms.allow_eval', 'false'))
 
-            # Fill method
-            fill_method = environ.get('pydap.responses.wms.fill_method', 'contourf')
-            assert fill_method in ['contour', 'contourf', 'pcolor', 'pcolormesh', 
-                                   'pcolorfast']
-
             # Fill thinning (recommended setting: 1,1)
             nthin_fill = map(int, 
                 environ.get('pydap.responses.wms.fill_thinning', "1,1") \
                 .split(','))
 
             # Vector method
-            vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
+            #vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
 
             # Image resolution and size
             dpi = float(environ.get('pydap.responses.wms.dpi', 80))
@@ -479,25 +501,22 @@ class WMSResponse(BaseResponse):
                 raise HTTPBadRequest(msg)
             figsize = w/dpi, h/dpi
 
-            # Time
-            # If time is None we will use the nearest timestep available
+            # Time; if time is None we will use the nearest timestep available
             time = query.get('time', None)
             if time == 'current': time = None
 
             # Vertical level
+            elevation = query.get('elevation', None)
+            if elevation is not None:
+                elevation = float(elevation)
+
+            # We support integer levels a little while longer
             level = int(query.get('level', 0))
-            vertical = query.get('vertical', None)
-            if vertical is not None:
-                vertical = float(vertical)
 
             # Bounding box in projection coordinates
             bbox = query.get('bbox', None)
             if bbox is not None:
                 bbox = [float(v) for v in bbox.split(',')]
-
-            # Get colorbar name and check whether it is valid by getting it
-            cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
-            self._get_cmap(cmapname)
 
             # Projection
             srs = query.get('srs', DEFAULT_CRS)
@@ -512,30 +531,6 @@ class WMSResponse(BaseResponse):
                 environ.get('pydap.responses.wms.pixels_between_vectors', 40))
             vector_offset = 0
             vector_color = 'k' 
-
-            # Process style element
-            styles = query.get('styles', 'fill_method=' + fill_method)
-            if len(styles) > 0:
-                styles = styles.split(',')
-                for style in styles:
-                    key, value = style.split('=')
-                    if key == 'fill_method':
-                        if value in ['contour', 'contourf', 
-                                     'pcolor', 'pcolormesh',
-                                     'pcolorfast']:
-                            fill_method = value
-                    elif key == 'vector_method':
-                        if value in ['black_vector', 'black_quiver', 
-                                     'black_barbs', 'black_arrowbarbs',
-                                     'color_quiver1', 'color_quiver2',
-                                     'color_quiver3', 'color_quiver4']:
-                            vector_method = value
-                    elif key == 'vector_color':
-                        vector_color = value
-                    elif key == 'vector_spacing':
-                        vector_spacing = int(value)
-                    elif key == 'vector_offset':
-                        vector_offset = int(value)
 
             # Construct layer list
             layers = [layer for layer in query.get('layers', '').split(',')
@@ -554,12 +549,75 @@ class WMSResponse(BaseResponse):
                     if not gridutils.is_valid(grid, self.dataset):
                         raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
 
-            return query, dpi, fill_method, vector_method, vector_color, time, \
-                   level, figsize, bbox, cmapname, srs, styles, w, h, \
-                   nthin_fill, vector_spacing, vector_offset, allow_eval, \
+            # Process styles element
+            styles = query.get('styles', None)
+            if styles is None:
+                msg = 'Request must include STYLES parameter'
+                raise HTTPBadRequest(msg)
+            styles = unquote(styles)
+            if len(styles) > 0:
+                styles = styles.split(',')
+            else:
+                styles = len(layers)*['']
+
+            # Defaults
+            legend = environ.get('pydap.responses.wms.cmap', 'jet')
+            plot_method = 'contourf'
+
+            # FIXME: We currently only support one legend and other style params.
+            # Change to dict of layer items instead
+            for style in styles:
+                found_legend = False
+                if len(style) > 0:
+                    style_items = style.split(';')
+                    for style_item in style_items:
+                        key, value = style_item.split('=')
+                        if key == 'plot_method':
+                            if value in ['contour', 'contourf', 
+                                         'pcolor', 'pcolormesh',
+                                         'pcolorfast',
+                                         'black_vector', 'black_quiver', 
+                                         'black_barbs', 'black_arrowbarbs',
+                                         'color_quiver1', 'color_quiver2',
+                                         'color_quiver3', 'color_quiver4']:
+                                plot_method = value
+                        elif key == 'vector_color':
+                            vector_color = value
+                        elif key == 'vector_spacing':
+                            vector_spacing = int(value)
+                        elif key == 'vector_offset':
+                            vector_offset = int(value)
+                        elif key == 'legend':
+                            #legend = unicode(value, "utf-8")
+                            legend = value.strip()
+                            found_legend = True
+                if not found_legend:
+                    # Use defaults
+                    # FIXME: Change to use dict of layers
+                    attrs = grid.attributes
+                    if 'standard_name' in attrs and \
+                        attrs['standard_name'] in self.styles:
+                        legend = self.styles[attrs['standard_name']][0]['legend']
+
+            legend_qs = query.get('legend', None)
+            if legend_qs is not None:
+                legend = legend_qs
+
+            # Check whether legend is valid by getting it
+            self._get_cmap(legend)
+
+            if len(styles) != len(layers):
+                msg = 'STYLES and LAYERS must contain the same number of ' \
+                      'elements (STYLE can also be empty)'
+                raise HTTPBadRequest(msg)
+             
+            return query, dpi, plot_method, vector_color, time, \
+                   elevation, level, figsize, bbox, legend, srs, styles, w, \
+                   h, nthin_fill, vector_spacing, vector_offset, allow_eval, \
                    layers
-        query, dpi, fill_method, vector_method, vector_color, time, level, \
-            figsize, bbox, cmapname, srs, styles, w, h, nthin_fill, \
+
+        query, dpi, plot_method, vector_color, time, elevation, \
+            level, figsize, bbox, legend, srs, styles, w, h, nthin_fill, \
             vector_spacing, vector_offset, allow_eval, layers \
             = prep_map(environ)
 
@@ -624,9 +682,9 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         grids.append(grid)
-                    self._plot_grid(dataset, grids, time, level, bbox_local, 
-                                    (w, h), ax, srs, fill_method, nthin_fill,
-                                    cmapname, expr=expr, layers=vlayers)
+                    self._plot_grid(dataset, grids, time, elevation, level, bbox_local, 
+                                    (w, h), ax, srs, plot_method, nthin_fill,
+                                    legend, expr=expr, layers=vlayers)
                 elif len(vlayers) == 1:
                     # Plot scalar field
                     names = [dataset] + hlayers
@@ -638,9 +696,9 @@ class WMSResponse(BaseResponse):
                             bbox_local = [np.min(lon), np.min(lat), np.max(lon), np.max(lat)]
                         else:
                             bbox_local = bbox[:]
-                        self._plot_grid(dataset, grid, time, level, bbox_local,
-                                        (w, h), ax, srs, fill_method,
-                                        nthin_fill, cmapname)
+                        self._plot_grid(dataset, grid, time, elevation, level,
+                                        bbox_local, (w, h), ax, srs,
+                                        plot_method, nthin_fill, legend)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -656,14 +714,14 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         grids.append(grid)
-                    self._plot_vector_grids(dataset, grids, time, level,
-                        bbox_local, (w, h), ax, srs, vector_method, 
-                        vector_color, cmapname, vector_spacing, vector_offset)
+                    self._plot_vector_grids(dataset, grids, time, elevation,
+                        level, bbox_local, (w, h), ax, srs, plot_method, 
+                        vector_color, legend, vector_spacing, vector_offset)
                     # Force paletting of black vector plots to max 7 colors
                     # and 127 for color vectors (disabled - antialiasing is
                     # disabled for color vectors for now)
-                    if vector_method in ['black_vector', 'black_quiver', 
-                                         'black_barbs', 'black_arrowbarbs']:
+                    if plot_method in ['black_vector', 'black_quiver', 
+                                       'black_barbs', 'black_arrowbarbs']:
                         ncolors = 7
                     #else:
                     #    ncolors = 127
@@ -989,9 +1047,9 @@ class WMSResponse(BaseResponse):
 
 
     #@profile
-    def _plot_vector_grids(self, dataset, grids, tm, level, bbox, size, ax, srs,
-                           vector_method, vector_color, cmapname, vector_spacing,
-                           vector_offset):
+    def _plot_vector_grids(self, dataset, grids, tm, elevation, level, bbox,
+                           size, ax, srs, vector_method, vector_color, 
+                           cmapname, vector_spacing, vector_offset):
         try:
             # Slice according to time request (WMS-T).
             l = gridutils.time_slice(tm, grids[0], dataset)
@@ -999,8 +1057,17 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
-        # Return empty image for vertical indices out of range
         vertical = gridutils.get_vertical(grids[0])
+        if elevation is not None:
+            vert = np.asarray(vertical[:])
+            vert_bool = np.isclose(vert, elevation)
+            if not vert_bool.any():
+                # Return empty image for requests with no corresponding
+                # vertical level
+                return
+            level = np.where(vert_bool)[0][0]
+
+        # Return empty image for vertical indices out of range
         if vertical is not None and vertical.shape[0] <= level:
             return
 
@@ -1204,8 +1271,8 @@ class WMSResponse(BaseResponse):
 
 
     #@profile
-    def _plot_grid(self, dataset, grid, time, level, bbox, size, ax, srs,
-                   fill_method, nthin=(5, 5), cmapname='jet', expr=None,
+    def _plot_grid(self, dataset, grid, time, elevation, level, bbox, size, ax,
+                   srs, fill_method, nthin=(5, 5), cmapname='jet', expr=None,
                    layers=None):
         if expr is not None:
             aeval = RestrictedInterpreter()
@@ -1221,8 +1288,17 @@ class WMSResponse(BaseResponse):
             # Return empty image for out of time range requests
             return
  
-        # Return empty image for vertical indices out of range
         vertical = gridutils.get_vertical(grid)
+        if elevation is not None:
+            vert = np.asarray(vertical[:])
+            vert_bool = np.isclose(vert, elevation)
+            if not vert_bool.any():
+                # Return empty image for requests with no corresponding
+                # vertical level
+                return
+            level = np.where(vert_bool)[0][0]
+
+        # Return empty image for vertical indices out of range
         if vertical is not None and vertical.shape[0] <= level:
             return
 
@@ -1408,18 +1484,97 @@ class WMSResponse(BaseResponse):
 
             # Remove ``REQUEST=GetCapabilites`` from query string.
             location = construct_url(environ, with_query_string=True)
+
             #base = location.split('REQUEST=')[0].rstrip('?&')
             base = location.split('?')[0].rstrip('.wms')
+
+            # Store information for regular layers
+            layers = []
+            for grid in grids:
+                # Style information
+                standard_name = grid.attributes.get('standard_name', None)
+                styles = []
+                if standard_name is not None:
+                    styles = self.styles.get(standard_name, [])
+
+                # Spatial information
+                lon = gridutils.get_lon(grid, dataset)
+                lat = gridutils.get_lat(grid, dataset)
+                minx, maxx = np.min(lon), np.max(lon)
+                miny, maxy = np.min(lat), np.max(lat)
+                bbox = [minx, miny, maxx, maxy]
+
+                # Vertical dimension
+                z = gridutils.get_vertical(grid)
+                dims = grid.dimensions
+                if z is not None:
+                    if z.name not in dims:
+                        z = None
+
+                # Time information
+                time = gridutils.get_time(grid)
+
+                layer = {
+                    'name': grid.name,
+                    'title': grid.attributes.get('long_name', grid.name),
+                    'abstract': grid.attributes.get('history', ''),
+                    'styles': styles,
+                    'bounding_box': bbox,
+                    'vertical': z,
+                    'time': time
+                }
+                layers.append(layer)
+                 
+            # Find and store information for vector layers
+            for u_grid in grids:
+                u_standard_name = u_grid.attributes.get('standard_name', None)
+                if u_standard_name.startswith('eastward_'):
+                    postfix = u_standard_name.split('_', 1)[1]
+                    standard_name = 'northward_' + postfix
+                    for v_grid in grids:
+                        v_standard_name = v_grid.attributes.get(
+                                          'standard_name', None)
+                        if standard_name == v_standard_name:
+                            styles = self.styles.get(postfix, [])
+
+                            # Spatial information
+                            lon = gridutils.get_lon(u_grid, dataset)
+                            lat = gridutils.get_lat(u_grid, dataset)
+                            minx, maxx = np.min(lon), np.max(lon)
+                            miny, maxy = np.min(lat), np.max(lat)
+                            bbox = [minx, miny, maxx, maxy]
+
+                            # Vertical dimension
+                            z = gridutils.get_vertical(u_grid)
+                            dims = u_grid.dimensions
+                            if z is not None:
+                                if z.name not in dims:
+                                    z = None
+
+                            # Time information
+                            time = gridutils.get_time(u_grid)
+
+                            layer = {
+                                'name': ':'.join([u_grid.name, v_grid.name]),
+                                'title': postfix,
+                                'abstract': grid.attributes.get('history', ''),
+                                'styles': styles,
+                                'bounding_box': bbox,
+                                'vertical': z,
+                                'time': time
+                            }
+                            layers.append(layer)
 
             context = {
                     'dataset': dataset,
                     'location': base,
-                    'layers': grids,
+                    'layers': layers,
                     'lon_range': lon_range,
                     'lat_range': lat_range,
                     'max_width': MAX_WIDTH,
                     'max_height': MAX_HEIGHT,
                     'default_crs': DEFAULT_CRS,
+                    'default_styles': self.styles,
                     'supported_crs': SUPPORTED_CRS
                     }
             # Load the template using the specified renderer, or fallback to the 
@@ -1525,8 +1680,9 @@ class WMSResponse(BaseResponse):
                     output[layer]['units'] = attrs['units']
                 if 'long_name' in items and 'long_name' in attrs:
                     output[layer]['long_name'] = attrs['long_name']
-                if 'colormap' in items and 'colormap' in attrs:
-                    output[layer]['colormap'] = attrs['colormap']
+                if 'styles' in items and 'standard_name' in attrs and \
+                   attrs['standard_name'] in self.styles:
+                    output[layer]['styles'] = self.styles[attrs['standard_name']]
                 if 'bounds' in items:
                     try:
                         if not self.cache:
