@@ -23,9 +23,10 @@ NUMPY_RENAMES = {}
 LOCALFUNCS = {}
 
 class RestrictedInterpreter(Interpreter):
-    """mathematical expression compiler and interpreter.
+    """\
+    Mathematical expression compiler and interpreter.
 
-  This is a more restricted version of asteval.Interpreter.
+    This is a more restricted version of asteval.Interpreter.
     """
     supported_nodes = ('binop', 'call', 'expr', 'module', 'name', 'num')
 
