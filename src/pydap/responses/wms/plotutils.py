@@ -1,9 +1,9 @@
 from __future__ import division
 import ctypes
 try:
-    from cStringIO import StringIO
+    from cStringIO import StringIO as BytesIO
 except ImportError:
-    from io import StringIO
+    from io import BytesIO
 
 import numpy as np
 import netCDF4
@@ -120,7 +120,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
 
     # Save to buffer.
     canvas = FigureCanvas(fig)
-    output = StringIO() 
+    output = BytesIO() 
     canvas.print_png(output)
     """
     if paletted:
@@ -137,7 +137,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
             ncolors = None
         output = convert_paletted(canvas, ncolors=ncolors)
     else:
-        output = StringIO() 
+        output = BytesIO() 
         canvas.print_png(output)
     """
     return output
@@ -150,7 +150,7 @@ def convert_paletted(canvas, ncolors=None, backend='PIL', verbose=False):
     employed. Pixels are considered transparent if the
     alpha channel value is <= 128 and opaque otherwise. 
 
-    Returns a memory file (StringIO object) containing the PNG
+    Returns a memory file (BytesIO object) containing the PNG
     image.
     """
     if backend == 'wand':
@@ -180,10 +180,10 @@ def convert_paletted_wand(canvas, ncolors=None, verbose=False):
     """
     ImageMagick based conversion to paletted PNG.
     """
-    outbuffer = StringIO() 
+    outbuffer = BytesIO() 
    
     # Read image
-    inbuffer = StringIO()
+    inbuffer = BytesIO()
     # TODO: If and when wand supports reading raw RGBA we can
     # use the much faster canvas.print_to_buffer() method
     canvas.print_png(inbuffer)
@@ -215,10 +215,10 @@ def convert_paletted_pil(canvas, ncolors=None, verbose=False):
     employed. Pixels are considered transparent if the
     alpha channel value is <= 128 and opaque otherwise. 
 
-    Returns a memory file (StringIO object) containing the PNG
+    Returns a memory file (BytesIO object) containing the PNG
     image.
     """
-    outbuffer = StringIO() 
+    outbuffer = BytesIO() 
    
     # Read image
     buf, size = canvas.print_to_buffer()

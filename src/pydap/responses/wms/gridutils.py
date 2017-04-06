@@ -19,7 +19,7 @@ def get_lon(grid, dataset):
     def check_attrs(var):
         if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
             var.attributes.get('standard_name', '') == 'longitude'):
-            return var
+            return np.asarray(var[:])
         #if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
         #    var.attributes.get('axis', '').lower() == 'x' or
         #    var.attributes.get('standard_name', '') == 'longitude'):
@@ -28,14 +28,14 @@ def get_lon(grid, dataset):
     # check maps first
     for dim in grid.maps.values():
         if check_attrs(dim) is not None:
-            return dim
+            return np.asarray(dim[:])
 
     # check curvilinear grids
     if hasattr(grid, 'coordinates'):
         coords = grid.coordinates.split()
         for coord in coords:
             if coord in dataset and check_attrs(dataset[coord].array) is not None:
-                return dataset[coord].array
+                return np.asarray(dataset[coord].array[:])
 
     return None
 
@@ -47,19 +47,19 @@ def get_lat(grid, dataset):
         #    return var
         if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
             var.attributes.get('standard_name', '') == 'latitude'):
-            return var
+            return np.asarray(var[:])
 
     # check maps first
     for dim in grid.maps.values():
         if check_attrs(dim) is not None:
-            return dim
+            return np.asarray(dim[:])
 
     # check curvilinear grids
     if hasattr(grid, 'coordinates'):
         coords = grid.coordinates.split()
         for coord in coords:
             if coord in dataset and check_attrs(dataset[coord].array) is not None:
-                return dataset[coord].array
+                return np.asarray(dataset[coord].array[:])
 
     return None
 
@@ -69,7 +69,7 @@ def get_time(grid):
             calendar = dim.attributes.get('calendar', 'standard')
             try:
                 utime = netcdftime.utime(dim.units, calendar=calendar)
-                tm = utime.num2date(np.asarray(dim))
+                tm = utime.num2date(np.asarray(dim[:]))
                 # Discard microseconds
                 for i in range(len(tm)):
                     tm[i] = tm[i].replace(microsecond=0)
@@ -82,7 +82,7 @@ def get_time(grid):
 def get_vertical(grid):
     for dim in grid.maps.values():
         if isvertical(dim):
-            return dim
+            return np.asarray(dim[:])
 
     return None
 

@@ -1,9 +1,14 @@
 from __future__ import division
 
 try:
-    from cStringIO import StringIO
+    from cStringIO import StringIO as BytesIO
 except ImportError:
-    from io import StringIO
+    from io import BytesIO
+
+try:
+    from functools import reduce
+except ImportError:
+    pass
 import re
 import operator
 import json
@@ -63,6 +68,7 @@ from .arrowbarbs import arrow_barbs
 from . import projutils
 from . import gridutils
 from . import plotutils
+from . import validation
 
 # Setup caching
 from dogpile.cache import make_region
@@ -70,11 +76,14 @@ from dogpile.cache.api import NO_VALUE
 
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 
                  'transparent', 'time', 'level', 'elevation', 'styles',
-                 'service', 'version', 'format', 'crs', 'bounds', 'srs',
-                 'expr', 'items', 'size']
+                 'service', 'version', 'format', 'crs', 'bounds',
+                 'exceptions', 'bgcolor', 'expr', 'items', 'size']
+MIN_WIDTH=0
 MAX_WIDTH=8192
+MIN_HEIGHT=0
 MAX_HEIGHT=8192
 DEFAULT_CRS = 'EPSG:4326'
+WMS_VERSION = '1.3.0'
 SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857', 'EPSG:900913', 'EPSG:3785', 'EPSG:3395']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
@@ -113,7 +122,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
     </GetMap>
   </Request>
   <Exception>
-    <Format>BLANK</Format>
+    <Format>XML</Format>
   </Exception>
   <Layer>
     <Title>WMS server for ${dataset.attributes.get('long_name', dataset.name)}</Title>
@@ -164,7 +173,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
       <Style py:for="style in layer['styles']">
         <?python
             style_list = []
-            for key, value in style.iteritems():
+            for key, value in style.items():
                 item = key + '%3D' + value
                 style_list.append(item)
             style_str = '%3B'.join(style_list)
@@ -183,89 +192,119 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
 </Capability>
 </WMS_Capabilities>"""
 
+
 class OutsideGridException(Exception):
     pass
 
-class WMSResponse(BaseResponse):
 
-    __description__ = "Web Map Service image"
+class WMSResponse(BaseResponse):
+    __description__ = "Web Map Service 1.3.0"
 
     renderer = GenshiRenderer(
             options={}, loader=StringLoader( {'capabilities.xml': DEFAULT_TEMPLATE} ))
 
+    exception_renderer = GenshiRenderer(
+            options={}, loader=StringLoader( {'exceptions.xml': validation.EXCEPTION_TEMPLATE} ))
+
     def __init__(self, dataset):
         BaseResponse.__init__(self, dataset)
-        self.headers.append( ('Content-description', 'dods_wms') )
+        self.headers.append( ('Content-Description', 'dods_wms') )
 
     #@profile
     @wsgify
     def __call__(self, req):
         environ = req.environ
-        query = parse_dict_querystring_lower(environ)
-        # TODO: Check if SERVICE=WMS; return exception otherwise
 
         # Init colors and styles class instances on first invokation
-        self._init_colors(environ)
-        self._init_styles(environ)
-
+        config = environ.get('pydap.config', {})
+        self._init_colors(config)
+        self._init_styles(config)
+    
         # Init redis cache on first invokation
-        self._init_cache(environ)
-
+        self._init_cache(config)
+    
+        query = parse_dict_querystring_lower(environ)
         try:
-            dap_query = ['%s=%s' % (k, query[k]) for k in query
-                    if k.lower() not in WMS_ARGUMENTS]
-            dap_query = [pair.rstrip('=') for pair in dap_query]
-            dap_query.sort()  # sort for uniqueness
-            dap_query = '&'.join(dap_query)
-            self.location = construct_url(environ,
-                    with_query_string=True,
-                    querystring=dap_query)
-            # Since we might use different aliases for this host we only use
-            # the path component to identify the dataset
-            self.path = urlparse(self.location).path
-                
-            # Check if user requests us not to cache stuff
-            wmsCache = asbool(query.get('cache', 'true'))
-            if wmsCache:
+            query_valid = validation.validate(environ, self.dataset,
+                                              self.styles)
+            # Get REQUEST
+            type_ = query_valid.get('request')
+
+            try:
+                dap_query = ['%s=%s' % (k, query[k]) for k in query
+                        if k.lower() not in WMS_ARGUMENTS]
+                dap_query = [pair.rstrip('=') for pair in dap_query]
+                dap_query.sort()  # sort for uniqueness
+                dap_query = '&'.join(dap_query)
+                self.location = construct_url(environ,
+                        with_query_string=True,
+                        querystring=dap_query)
+                # Since we might use different aliases for this host we only use
+                # the path component to identify the dataset
+                self.path = urlparse(self.location).path
+                    
                 # Create a Beaker cache dependent on the query string for
                 # pre-computed values that depend on the specific dataset
                 # We exclude all WMS related arguments since they don't
                 # affect the dataset.
                 self.cache = self.cacheRegion
-            else:
+            except KeyError:
                 self.cache = None
-        except KeyError:
-            self.cache = None
-
-        # Support cross-origin resource sharing (CORS)
-        self.headers.append( ('Access-Control-Allow-Origin', '*') )
-
-        # Handle GetMap, GetColorbar, GetCapabilities and GetMetadata requests
-        type_ = query.get('request', 'GetMap')
-        if type_ == 'GetCapabilities':
-            content = self._get_capabilities(environ)
-            self.headers.append( ('Content-type', 'text/xml') )
-        elif type_ == 'GetMetadata':
-            content = self._get_metadata(environ)
-            self.headers.append( ('Content-type', 'application/json; charset=utf-8') )
-        elif type_ == 'GetMap':
-            content = self._get_map(environ)
-            self.headers.append( ('Content-type', 'image/png') )
-        elif type_ == 'GetColorbar':
-            content = self._get_colorbar(environ)
-            self.headers.append( ('Content-type', 'image/png') )
-        else:
-            raise HTTPBadRequest('Invalid REQUEST "%s"' % type_)
-
-        # The GetCapabilities default time response changes with time
-        # and it is therefore not cached
-        if type_ != 'GetCapabilities':
-            # Check if we should return a 304 Not Modified response
-            self._check_last_modified(environ)
-
-            if wmsCache:
+    
+            # Support cross-origin resource sharing (CORS)
+            self.headers.append( ('Access-Control-Allow-Origin', '*') )
+    
+            # Handle GetMap, GetColorbar, GetCapabilities and GetMetadata requests
+            if type_ == 'GetCapabilities':
+                content = self._get_capabilities(environ)
+                self.headers.append( ('Content-Type', 'text/xml') )
+            elif type_ == 'GetMetadata':
+                content = self._get_metadata(environ)
+                self.headers.append( ('Content-Type', 'application/json; charset=utf-8') )
+            elif type_ == 'GetMap':
+                content = self._get_map(environ)
+                self.headers.append( ('Content-Type', 'image/png') )
+            elif type_ == 'GetColorbar':
+                content = self._get_colorbar(environ)
+                self.headers.append( ('Content-Type', 'image/png') )
+            else:
+                raise HTTPBadRequest('Invalid REQUEST "%s"' % type_)
+    
+            # The GetCapabilities default time response changes with time
+            # and it is therefore not cached
+            if type_ != 'GetCapabilities':
+                # Check if we should return a 304 Not Modified response
+                # This check has been disabled since the required information
+                # is not available in the environ variable in pydap 3.2.0
+                #self._check_last_modified(environ)
+    
                 # Set response caching headers
                 self._set_caching_headers(environ)
+
+        except validation.WMSException as err:
+            # Remove existing Content-Type header and insert text/xml
+            for header in self.headers:
+                if header[0].lower() == 'content-type':
+                    self.headers.remove(header)
+            self.headers.append( ('Content-Type', 'text/xml') )
+
+            # Render XML response
+            context = {
+                'message': str(err),
+                'error_code': err.error_code
+            }
+            try:
+                renderer = environ['pydap.exception_renderer']
+                template = renderer.loader('exceptions.xml')
+            except (KeyError, TemplateNotFound):
+                renderer = self.exception_renderer
+                template = renderer.loader('exceptions.xml')
+            output = renderer.render(template, context, output_format='text/xml')
+            output = output.encode('utf-8')
+
+            # Return WSGI response object
+            return Response(body=output, status=err.status_code,
+                             headerlist=self.headers)
 
         return Response(body=content[0], headers=self.headers)
 
@@ -281,10 +320,10 @@ class WMSResponse(BaseResponse):
                         if if_modified_since <= last_modified:
                             raise HTTPNotModified
 
-    def _set_caching_headers(self, environ):
+    def _set_caching_headers(self, config):
         """Set caching headers"""
-        max_age = environ.get('pydap.responses.wms.max_age', None)
-        s_maxage = environ.get('pydap.responses.wms.s_maxage', None)
+        max_age = config.get('pydap.responses.wms.max_age', None)
+        s_maxage = config.get('pydap.responses.wms.s_maxage', None)
         cc_str = 'public'
         if max_age is not None:
             cc_str = cc_str + ', max-age=%i' % int(max_age)
@@ -293,10 +332,10 @@ class WMSResponse(BaseResponse):
         if max_age is not None or s_maxage is not None:
             self.headers.append( ('Cache-Control', cc_str) )
 
-    def _init_colors(self, environ):
+    def _init_colors(self, config):
         """Set class variable "colors" on first call"""
         if not hasattr(WMSResponse, 'colors'):
-            colorfile = environ.get('pydap.responses.wms.colorfile', None)
+            colorfile = config.get('pydap.responses.wms.colorfile', None)
             if colorfile is None:
                 WMSResponse.colors = {}
             else:
@@ -312,10 +351,10 @@ class WMSResponse(BaseResponse):
                     WMSResponse.colors = colors
                 del colorfile
 
-    def _init_styles(self, environ):
+    def _init_styles(self, config):
         """Set class variable "styles" on first call"""
         if not hasattr(WMSResponse, 'styles'):
-            styles_file = environ.get('pydap.responses.wms.styles_file', None)
+            styles_file = config.get('pydap.responses.wms.styles_file', None)
             if styles_file is None:
                 WMSResponse.styles = {}
             else:
@@ -323,21 +362,21 @@ class WMSResponse(BaseResponse):
                     WMSResponse.styles = json.load(file)
                 del styles_file
 
-    def _init_cache(self, environ):
+    def _init_cache(self, config):
         """Set class variable "cacheRegion" on first call"""
         if not hasattr(WMSResponse, 'cacheRegion'):
-            redis = asbool(environ.get('pydap.responses.wms.redis', 'false'))
+            redis = asbool(config.get('pydap.responses.wms.redis', 'false'))
             if not redis:
                 WMSResponse.cacheRegion = None
             else:
                 WMSResponse.cacheRegion = make_region().configure(
                     'dogpile.cache.redis',
                     arguments = {
-                        'host': environ.get('pydap.responses.wms.redis.host', 'localhost'),
-                        'port': int(environ.get('pydap.responses.wms.redis.port', 6379)),
-                        'db': int(environ.get('pydap.responses.wms.redis.db', 0)),
-                        'redis_expiration_time': int(environ.get('pydap.responses.wms.redis.redis_expiration_time', 604800)),
-                        'distributed_lock': asbool(environ.get('pydap.responses.wms.redis.distributed_lock', 'false'))
+                        'host': config.get('pydap.responses.wms.redis.host', 'localhost'),
+                        'port': int(config.get('pydap.responses.wms.redis.port', 6379)),
+                        'db': int(config.get('pydap.responses.wms.redis.db', 0)),
+                        'redis_expiration_time': int(config.get('pydap.responses.wms.redis.redis_expiration_time', 604800)),
+                        'distributed_lock': asbool(config.get('pydap.responses.wms.redis.distributed_lock', 'false'))
                     }
                 )
         # Setup local caches for this process
@@ -351,8 +390,11 @@ class WMSResponse(BaseResponse):
         # Get query string parameters
         query = parse_dict_querystring_lower(environ)
 
+        # Get pydap configuration
+        config = environ.get('pydap.config', {})
+
         # Get colorbar name and check whether it is valid
-        cmapname = query.get('cmap', environ.get('pydap.responses.wms.cmap', 'jet'))
+        cmapname = query.get('cmap', config.get('pydap.responses.wms.cmap', 'jet'))
         self._get_cmap(cmapname)
 
         # Scale DPI according to size
@@ -392,8 +434,8 @@ class WMSResponse(BaseResponse):
             transparent = asbool(query.get('transparent', 'true'))
 
             # Get WMS settings
-            dpi = float(environ.get('pydap.responses.wms.dpi', 80))
-            paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
+            dpi = float(config.get('pydap.responses.wms.dpi', 80))
+            paletted = asbool(config.get('pydap.responses.wms.paletted', 'false'))
 
             # Set color bar size depending on orientation
             w, h = 100, 300
@@ -478,21 +520,16 @@ class WMSResponse(BaseResponse):
         def prep_map(environ):
             query = parse_dict_querystring_lower(environ)
 
+            # Get pydap configuration
+            config = environ.get('pydap.config', {})
+
             # TODO: Validate requested media type is image/png; throw InvalidFormat
 
             # Allow basic mathematical operations on layers
-            allow_eval = asbool(environ.get('pydap.responses.wms.allow_eval', 'false'))
-
-            # Fill thinning (recommended setting: 1,1)
-            nthin_fill = map(int, 
-                environ.get('pydap.responses.wms.fill_thinning', "1,1") \
-                .split(','))
-
-            # Vector method
-            #vector_method = environ.get('pydap.responses.wms.vector_method', 'black_vector')
+            allow_eval = asbool(config.get('pydap.responses.wms.allow_eval', 'false'))
 
             # Image resolution and size
-            dpi = float(environ.get('pydap.responses.wms.dpi', 80))
+            dpi = float(config.get('pydap.responses.wms.dpi', 80))
             w = float(query.get('width', 256))
             h = float(query.get('height', 256))
             if w > MAX_WIDTH or h > MAX_HEIGHT:
@@ -519,16 +556,16 @@ class WMSResponse(BaseResponse):
                 bbox = [float(v) for v in bbox.split(',')]
 
             # Projection
-            srs = query.get('srs', DEFAULT_CRS)
-            if srs == 'EPSG:900913': srs = 'EPSG:3785'
+            crs = query.get('crs', DEFAULT_CRS)
+            if crs == 'EPSG:900913': crs = 'EPSG:3785'
 
             # Reorder bounding box for EPSG:4326 which has lat/lon ordering
-            if srs == 'EPSG:4326':
+            if crs == 'EPSG:4326':
                 bbox = [bbox[1], bbox[0], bbox[3], bbox[2]]
 
             # Default vector settings
             vector_spacing = int(\
-                environ.get('pydap.responses.wms.pixels_between_vectors', 40))
+                config.get('pydap.responses.wms.pixels_between_vectors', 40))
             vector_offset = 0
             vector_color = 'k' 
 
@@ -550,10 +587,7 @@ class WMSResponse(BaseResponse):
                         raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
 
             # Process styles element
-            styles = query.get('styles', None)
-            if styles is None:
-                msg = 'Request must include STYLES parameter'
-                raise HTTPBadRequest(msg)
+            styles = query.get('styles')
             styles = unquote(styles)
             if len(styles) > 0:
                 styles = styles.split(',')
@@ -561,7 +595,7 @@ class WMSResponse(BaseResponse):
                 styles = len(layers)*['']
 
             # Defaults
-            legend = environ.get('pydap.responses.wms.cmap', 'jet')
+            legend = config.get('pydap.responses.wms.cmap', 'jet')
             plot_method = 'contourf'
 
             # FIXME: We currently only support one legend and other style params.
@@ -599,10 +633,6 @@ class WMSResponse(BaseResponse):
                         attrs['standard_name'] in self.styles:
                         legend = self.styles[attrs['standard_name']][0]['legend']
 
-            legend_qs = query.get('legend', None)
-            if legend_qs is not None:
-                legend = legend_qs
-
             # Check whether legend is valid by getting it
             self._get_cmap(legend)
 
@@ -612,12 +642,12 @@ class WMSResponse(BaseResponse):
                 raise HTTPBadRequest(msg)
              
             return query, dpi, plot_method, vector_color, time, \
-                   elevation, level, figsize, bbox, legend, srs, styles, w, \
-                   h, nthin_fill, vector_spacing, vector_offset, allow_eval, \
+                   elevation, level, figsize, bbox, legend, crs, styles, w, \
+                   h, vector_spacing, vector_offset, allow_eval, \
                    layers
 
         query, dpi, plot_method, vector_color, time, elevation, \
-            level, figsize, bbox, legend, srs, styles, w, h, nthin_fill, \
+            level, figsize, bbox, legend, crs, styles, w, h, \
             vector_spacing, vector_offset, allow_eval, layers \
             = prep_map(environ)
 
@@ -631,7 +661,7 @@ class WMSResponse(BaseResponse):
             # the WMSResponse class while the second level is in the redis cache
             
             if 'figures' in self.localCache and figsize in self.localCache['figures'].keys():
-                fig = cPickle.loads(self.localCache['figures'][figsize])
+                fig = pickle.loads(self.localCache['figures'][figsize])
                 ax = fig.get_axes()[0]
             else:
                 try:
@@ -648,7 +678,7 @@ class WMSResponse(BaseResponse):
                         key = (figsize, 'figure')
                         self.cache.set(key, fig)
             if figsize not in self.localCache['figures'].keys():
-                self.localCache['figures'][figsize] = cPickle.dumps(fig, -1)
+                self.localCache['figures'][figsize] = pickle.dumps(fig, -1)
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
             if asbool(query.get('transparent', 'true')):
@@ -683,7 +713,7 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         grids.append(grid)
                     self._plot_grid(dataset, grids, time, elevation, level, bbox_local, 
-                                    (w, h), ax, srs, plot_method, nthin_fill,
+                                    (w, h), ax, crs, plot_method, 
                                     legend, expr=expr, layers=vlayers)
                 elif len(vlayers) == 1:
                     # Plot scalar field
@@ -697,8 +727,8 @@ class WMSResponse(BaseResponse):
                         else:
                             bbox_local = bbox[:]
                         self._plot_grid(dataset, grid, time, elevation, level,
-                                        bbox_local, (w, h), ax, srs,
-                                        plot_method, nthin_fill, legend)
+                                        bbox_local, (w, h), ax, crs,
+                                        plot_method, legend)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -715,7 +745,7 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         grids.append(grid)
                     self._plot_vector_grids(dataset, grids, time, elevation,
-                        level, bbox_local, (w, h), ax, srs, plot_method, 
+                        level, bbox_local, (w, h), ax, crs, plot_method, 
                         vector_color, legend, vector_spacing, vector_offset)
                     # Force paletting of black vector plots to max 7 colors
                     # and 127 for color vectors (disabled - antialiasing is
@@ -732,29 +762,30 @@ class WMSResponse(BaseResponse):
             ax.axis('off')
             canvas = FigureCanvas(fig)
             # Optionally convert to paletted png
-            paletted = asbool(environ.get('pydap.responses.wms.paletted', 'false'))
+            config = environ.get('pydap.config', {})
+            paletted = asbool(config.get('pydap.responses.wms.paletted', 'false'))
             if paletted:
                 output = plotutils.convert_paletted(canvas, ncolors=ncolors)
             else:
-                output = StringIO() 
+                output = BytesIO() 
                 canvas.print_png(output)
             if hasattr(dataset, 'close'): dataset.close()
             return [ output.getvalue() ]
         return serialize(self.dataset)
 
     #@profile
-    def _get_proj(self, srs):
+    def _get_proj(self, crs):
         """\
         Returns projection objects.
         """
         # We assume that lon/lat arrays are centered on data points
-        base_srs = 'EPSG:4326'
-        do_proj = srs != base_srs
+        base_crs = 'EPSG:4326'
+        do_proj = crs != base_crs
 
         if do_proj:
             # We use cached versions of the projection object if possible.
             # It is safe to store these forever.
-            key = (base_srs, 'pyproj')
+            key = (base_crs, 'pyproj')
             if 'pyproj' in self.localCache and key in self.localCache['pyproj'].keys():
                 p_base = self.localCache['pyproj'][key]
             else:
@@ -765,13 +796,13 @@ class WMSResponse(BaseResponse):
                     if p_base is NO_VALUE:
                         raise KeyError
                 except KeyError:
-                    p_base = pyproj.Proj(init=base_srs)
+                    p_base = pyproj.Proj(init=base_crs)
                     if self.cache:
                         self.cache.set(key, p_base)
             if key not in self.localCache['pyproj'].keys():
                 self.localCache['pyproj'][key] = p_base
              
-            key = (srs, 'pyproj')
+            key = (crs, 'pyproj')
             if 'pyproj' in self.localCache and key in self.localCache['pyproj'].keys():
                 p_query = self.localCache['pyproj'][key]
             else:
@@ -782,7 +813,7 @@ class WMSResponse(BaseResponse):
                     if p_query is NO_VALUE:
                         raise KeyError
                 except KeyError:
-                    p_query = pyproj.Proj(init=srs)
+                    p_query = pyproj.Proj(init=crs)
                     if self.cache:
                         self.cache.set(key, p_query)
             if key not in self.localCache['pyproj'].keys():
@@ -793,7 +824,7 @@ class WMSResponse(BaseResponse):
         return do_proj, p_base, p_query
 
     #@profile
-    def _prepare_grid(self, srs, bbox, grid, dataset, return_proj):
+    def _prepare_grid(self, crs, bbox, grid, dataset, return_proj):
         """\
         Calculates various grid parameters.
         """
@@ -806,12 +837,12 @@ class WMSResponse(BaseResponse):
 
         # This operation is expensive - cache results both locally and using
         # redis
-        key = (self.path, grid.id, srs, 'project_data')
+        key = (self.path, grid.id, crs, 'project_data')
         try:
             if not ('project_data' in self.localCache and
                     key in self.localCache['project_data'].keys()):
                 raise KeyError
-            lon, lat, dlon, do_proj = cPickle.loads(self.localCache['project_data'][key])
+            lon, lat, dlon, do_proj = pickle.loads(self.localCache['project_data'][key])
             # Check that the dimensions match - otherwise discard
             # cached value and recalculate
             # TODO: Check first and last values as well
@@ -845,12 +876,12 @@ class WMSResponse(BaseResponse):
                 lon = np.asarray(lonGrid[:])
                 lat = np.asarray(latGrid[:])
                 got_proj = True
-                do_proj, p_base, p_query = self._get_proj(srs)
+                do_proj, p_base, p_query = self._get_proj(crs)
                 if not do_proj:
                     dlon = 360.0
                 else:
                     # Fetch projected data from disk if possible
-                    proj_attr = 'coordinates_' + srs.replace(':', '_')
+                    proj_attr = 'coordinates_' + crs.replace(':', '_')
                     if proj_attr in grid.attributes:
                         proj_coords = grid.attributes[proj_attr].split()
                         yname, xname = proj_coords
@@ -863,22 +894,21 @@ class WMSResponse(BaseResponse):
                     if self.cache:
                         self.cache.set(key, (lon, lat, dlon, do_proj))
         if key not in self.localCache['project_data'].keys():
-            self.localCache['project_data'][key] = cPickle.dumps((lon, lat, dlon, do_proj), -1)
+            self.localCache['project_data'][key] = pickle.dumps((lon, lat, dlon, do_proj), -1)
 
         if return_proj:
             if not got_proj:
-                do_proj, p_base, p_query = self._get_proj(srs)
+                do_proj, p_base, p_query = self._get_proj(crs)
             return lon, lat, dlon, cyclic, do_proj, p_base, p_query
         else:
             return lon, lat, dlon, cyclic
 
     #@profile
-    def _find_slices(self, lon, lat, dlon, bbox, cyclic, nthin, size):
+    def _find_slices(self, lon, lat, dlon, bbox, cyclic, size):
         """Returns slicing information for a given input."""
         # Retrieve only the data for the request bbox, and at the 
         # optimal resolution (avoiding oversampling).
         w, h = size
-        nthin_lat, nthin_lon = nthin
         if len(lon.shape) == 1:
             I, J = np.arange(lon.shape[0]), np.arange(lat.shape[0])
 
@@ -901,8 +931,8 @@ class WMSResponse(BaseResponse):
                 if (not xcond.any() or not ycond.any()):
                     raise OutsideGridException
 
-            istep = max(1, int(np.floor( (nthin_lon * lon.shape[0] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
-            jstep = max(1, int(np.floor( (nthin_lat * lat.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
+            istep = max(1, int(np.floor( (lon.shape[0] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
+            jstep = max(1, int(np.floor( (lat.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
             i0 = 0
             j0 = 0
             lon1 = lon[i0::istep]
@@ -952,8 +982,8 @@ class WMSResponse(BaseResponse):
                     raise OutsideGridException
 
             # Avoid oversampling
-            istep = max(1, int(np.floor( (nthin_lon * lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
-            jstep = max(1, int(np.floor( (nthin_lat * lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
+            istep = max(1, int(np.floor( (lon.shape[1] * (bbox[2]-bbox[0])) / (w * abs(np.amax(lon)-np.amin(lon))) )))
+            jstep = max(1, int(np.floor( (lon.shape[0] * (bbox[3]-bbox[1])) / (h * abs(np.amax(lat)-np.amin(lat))) )))
 
             # Find containing bounds
             # TODO: Performance can be improved by avoiding 2d I and J's
@@ -1048,7 +1078,7 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_vector_grids(self, dataset, grids, tm, elevation, level, bbox,
-                           size, ax, srs, vector_method, vector_color, 
+                           size, ax, crs, vector_method, vector_color, 
                            cmapname, vector_spacing, vector_offset):
         try:
             # Slice according to time request (WMS-T).
@@ -1080,7 +1110,7 @@ class WMSResponse(BaseResponse):
 
         # Extract projected grid information
         lon, lat, dlon, cyclic, do_proj, p_base, p_query = \
-                self._prepare_grid(srs, bbox, grids[0], dataset,
+                self._prepare_grid(crs, bbox, grids[0], dataset,
                                    return_proj=True)
 
         # If lon/lat arrays are 1d make them 2d
@@ -1111,7 +1141,7 @@ class WMSResponse(BaseResponse):
             try:
                 if not self.cache:
                     raise KeyError
-                key = (self.path, grids[0].id, tuple(bbox), srs, cnt_window,
+                key = (self.path, grids[0].id, tuple(bbox), crs, cnt_window,
                        vector_spacing, vector_offset, 'in_hull')
                 in_hull = self.cache.get(key)
                 if in_hull is NO_VALUE:
@@ -1129,8 +1159,8 @@ class WMSResponse(BaseResponse):
                     in_hull = in_hull & left_simplex
                 in_hull = np.invert(in_hull)
                 if self.cache:
-                    in_hull_str = StringIO()
-                    key = (self.path, grids[0].id, tuple(bbox), srs, 
+                    in_hull_str = BytesIO()
+                    key = (self.path, grids[0].id, tuple(bbox), crs, 
                            cnt_window, vector_spacing, vector_offset, 'in_hull')
                     self.cache.set(key, in_hull)
                     
@@ -1272,7 +1302,7 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_grid(self, dataset, grid, time, elevation, level, bbox, size, ax,
-                   srs, fill_method, nthin=(5, 5), cmapname='jet', expr=None,
+                   crs, fill_method, cmapname='jet', expr=None,
                    layers=None):
         if expr is not None:
             aeval = RestrictedInterpreter()
@@ -1304,7 +1334,7 @@ class WMSResponse(BaseResponse):
 
         # Extract projected grid information
         lon, lat, dlon, cyclic = \
-                  self._prepare_grid(srs, bbox, grid, dataset,
+                  self._prepare_grid(crs, bbox, grid, dataset,
                                      return_proj=False)
 
         # Now we plot the data window until the end of the bbox:
@@ -1314,7 +1344,7 @@ class WMSResponse(BaseResponse):
 
             try:
                 (j0, j1, jstep), (i0, i1, istep) = \
-                self._find_slices(lon, lat, dlon, bbox, cyclic, nthin, size)
+                self._find_slices(lon, lat, dlon, bbox, cyclic, size)
             except OutsideGridException:
                 lon += dlon
                 continue
@@ -1419,7 +1449,7 @@ class WMSResponse(BaseResponse):
             alon = np.asarray(dataset[acoords[1]][l,:])[:]
             alat = alat.reshape((nanno))
             alon = alon.reshape((nanno))
-            do_proj, p_base, p_query = self._get_proj(srs)
+            do_proj, p_base, p_query = self._get_proj(crs)
             x, y = pyproj.transform(p_base, p_query, alon, alat)
             _plot_annotations(adata, y, x, ax)
 
@@ -1488,82 +1518,7 @@ class WMSResponse(BaseResponse):
             #base = location.split('REQUEST=')[0].rstrip('?&')
             base = location.split('?')[0].rstrip('.wms')
 
-            # Store information for regular layers
-            layers = []
-            for grid in grids:
-                # Style information
-                standard_name = grid.attributes.get('standard_name', None)
-                styles = []
-                if standard_name is not None:
-                    styles = self.styles.get(standard_name, [])
-
-                # Spatial information
-                lon = gridutils.get_lon(grid, dataset)
-                lat = gridutils.get_lat(grid, dataset)
-                minx, maxx = np.min(lon), np.max(lon)
-                miny, maxy = np.min(lat), np.max(lat)
-                bbox = [minx, miny, maxx, maxy]
-
-                # Vertical dimension
-                z = gridutils.get_vertical(grid)
-                dims = grid.dimensions
-                if z is not None:
-                    if z.name not in dims:
-                        z = None
-
-                # Time information
-                time = gridutils.get_time(grid)
-
-                layer = {
-                    'name': grid.name,
-                    'title': grid.attributes.get('long_name', grid.name),
-                    'abstract': grid.attributes.get('history', ''),
-                    'styles': styles,
-                    'bounding_box': bbox,
-                    'vertical': z,
-                    'time': time
-                }
-                layers.append(layer)
-                 
-            # Find and store information for vector layers
-            for u_grid in grids:
-                u_standard_name = u_grid.attributes.get('standard_name', None)
-                if u_standard_name.startswith('eastward_'):
-                    postfix = u_standard_name.split('_', 1)[1]
-                    standard_name = 'northward_' + postfix
-                    for v_grid in grids:
-                        v_standard_name = v_grid.attributes.get(
-                                          'standard_name', None)
-                        if standard_name == v_standard_name:
-                            styles = self.styles.get(postfix, [])
-
-                            # Spatial information
-                            lon = gridutils.get_lon(u_grid, dataset)
-                            lat = gridutils.get_lat(u_grid, dataset)
-                            minx, maxx = np.min(lon), np.max(lon)
-                            miny, maxy = np.min(lat), np.max(lat)
-                            bbox = [minx, miny, maxx, maxy]
-
-                            # Vertical dimension
-                            z = gridutils.get_vertical(u_grid)
-                            dims = u_grid.dimensions
-                            if z is not None:
-                                if z.name not in dims:
-                                    z = None
-
-                            # Time information
-                            time = gridutils.get_time(u_grid)
-
-                            layer = {
-                                'name': ':'.join([u_grid.name, v_grid.name]),
-                                'title': postfix,
-                                'abstract': grid.attributes.get('history', ''),
-                                'styles': styles,
-                                'bounding_box': bbox,
-                                'vertical': z,
-                                'time': time
-                            }
-                            layers.append(layer)
+            layers = build_layers(dataset, self.styles)
 
             context = {
                     'dataset': dataset,
@@ -1576,7 +1531,7 @@ class WMSResponse(BaseResponse):
                     'default_crs': DEFAULT_CRS,
                     'default_styles': self.styles,
                     'supported_crs': SUPPORTED_CRS
-                    }
+            }
             # Load the template using the specified renderer, or fallback to the 
             # default template since most of the people won't bother installing
             # and/or creating a capabilities template -- this guarantees that the
@@ -1752,7 +1707,7 @@ def parse_dict_querystring_lower(environ):
     query = parse_dict_querystring(environ)
     # Convert WMS argument keys to lower case
     lowerlist = []
-    for k,v in query.iteritems():
+    for k,v in query.items():
         if k.lower() in WMS_ARGUMENTS:
             lowerlist.append(k)
     for k in lowerlist:
@@ -1796,3 +1751,85 @@ def _plot_annotations(data, y, x, ax):
        ax.text(xe, ye, pltstr, color=color, ha='center', va='center',
                fontsize=24, path_effects=[PathEffects.withStroke(linewidth=1.0,
                foreground='k')], zorder=100)
+
+def build_layers(dataset, supported_styles):
+    grids = [grid for grid in walk(dataset, GridType) if \
+            gridutils.is_valid(grid, dataset)]
+    # Store information for regular layers
+    layers = []
+    for grid in grids:
+        # Style information
+        standard_name = grid.attributes.get('standard_name', None)
+        styles = []
+        if standard_name is not None:
+            styles = supported_styles.get(standard_name, [])
+
+        # Spatial information
+        lon = np.asarray(gridutils.get_lon(grid, dataset)[:])
+        lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
+        minx, maxx = np.min(lon), np.max(lon)
+        miny, maxy = np.min(lat), np.max(lat)
+        bbox = [minx, miny, maxx, maxy]
+
+        # Vertical dimension
+        z = gridutils.get_vertical(grid)
+        dims = grid.dimensions
+        if z is not None:
+            if z.name not in dims:
+                z = None
+
+        # Time information
+        time = gridutils.get_time(grid)
+
+        layer = {
+            'name': grid.name,
+            'title': grid.attributes.get('long_name', grid.name),
+            'abstract': grid.attributes.get('history', ''),
+            'styles': styles,
+            'bounding_box': bbox,
+            'vertical': z,
+            'time': time
+        }
+        layers.append(layer)
+              
+    # Find and store information for vector layers
+    for u_grid in grids:
+        u_standard_name = u_grid.attributes.get('standard_name', None)
+        if u_standard_name.startswith('eastward_'):
+            postfix = u_standard_name.split('_', 1)[1]
+            standard_name = 'northward_' + postfix
+            for v_grid in grids:
+                v_standard_name = v_grid.attributes.get(
+                                  'standard_name', None)
+                if standard_name == v_standard_name:
+                    styles = supported_styles.get(postfix, [])
+
+                    # Spatial information
+                    lon = gridutils.get_lon(u_grid, dataset)
+                    lat = gridutils.get_lat(u_grid, dataset)
+                    minx, maxx = np.min(lon), np.max(lon)
+                    miny, maxy = np.min(lat), np.max(lat)
+                    bbox = [minx, miny, maxx, maxy]
+
+                    # Vertical dimension
+                    z = gridutils.get_vertical(u_grid)
+                    dims = u_grid.dimensions
+                    if z is not None:
+                        if z.name not in dims:
+                            z = None
+
+                    # Time information
+                    time = gridutils.get_time(u_grid)
+
+                    layer = {
+                        'name': ':'.join([u_grid.name, v_grid.name]),
+                        'title': postfix,
+                        'abstract': grid.attributes.get('history', ''),
+                        'styles': styles,
+                        'bounding_box': bbox,
+                        'vertical': z,
+                        'time': time
+                    }
+                    layers.append(layer)
+
+    return layers
