@@ -362,10 +362,10 @@ def validate(environ, dataset, styles):
 
     query = parse_dict_querystring_lower(environ)
 
+    query_valid_master = validate_wms(environ)
+
     # Get REQUEST
     type_ = query.get('request')
-
-    query_valid_master = {'request': type_}
 
     if type_ == 'GetCapabilities':
         query_valid = validate_get_capabilities(environ)
@@ -376,6 +376,9 @@ def validate(environ, dataset, styles):
     elif type_ == 'GetMetadata':
         # TODO: Move GetMetadata validation here
         query_valid = {}
+    else:
+        msg = 'Internal Error'
+        raise WMSException(msg, 500)
 
     query_valid_master.update(query_valid)
     return query_valid_master
