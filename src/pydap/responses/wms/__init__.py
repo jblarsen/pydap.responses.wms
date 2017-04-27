@@ -1559,9 +1559,9 @@ class WMSResponse(BaseResponse):
         def serialize(dataset):
             # Figure out when data file was last modified
             last_modified = None
-            for header in environ['pydap.headers']:
-                if 'Last-modified' in header:
-                    last_modified = header[1]
+            #for header in environ['pydap.headers']:
+            #    if 'Last-modified' in header:
+            #        last_modified = header[1]
 
             # Remove ``REQUEST=GetMetadata`` from query string.
             location = construct_url(environ, with_query_string=True)
