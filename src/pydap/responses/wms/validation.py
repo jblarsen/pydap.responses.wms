@@ -444,13 +444,13 @@ def build_layers(dataset, supported_styles):
               
     # Find and store information for vector layers
     for u_grid in grids:
-        u_standard_name = u_grid.attributes.get('standard_name', None)
+        u_standard_name = u_grid.attributes.get('standard_name', '')
         if u_standard_name.startswith('eastward_'):
             postfix = u_standard_name.split('_', 1)[1]
             standard_name = 'northward_' + postfix
             for v_grid in grids:
                 v_standard_name = v_grid.attributes.get(
-                                  'standard_name', None)
+                                  'standard_name', '')
                 if standard_name == v_standard_name:
                     styles = supported_styles.get(postfix, [])
 
