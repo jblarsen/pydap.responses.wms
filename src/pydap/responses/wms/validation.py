@@ -258,12 +258,12 @@ def validate_get_map(environ, dataset, dataset_styles):
     defined_styles = {l['name']: l['styles'] for l in \
                       defined_layers}
     for layer, style in zip(layers, styles):
-        defined_styles_layer = defined_styles[layer]
         if layer not in layer_names:
             msg = '%s in LAYERS=%s not defined; valid values=%s' \
-                  % (layer, layers_str, defined_layers)
+                  % (layer, layers_str, layer_names)
             error_code = 'LayerNotDefined'
             raise WMSException(msg, 400, error_code)
+        defined_styles_layer = defined_styles[layer]
         if style != '' and style not in defined_styles:
             msg = '%s in STYLE=%s not defined; valid values=%s' \
                   % (style, styles_str, defined_styles_layer)
