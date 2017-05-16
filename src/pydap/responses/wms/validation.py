@@ -144,6 +144,7 @@ def validate_get_capabilities(environ):
 
     return query_valid
 
+
 def validate_get_map(environ, dataset, dataset_styles):
     """\
     Validate GetMap call.
@@ -312,6 +313,7 @@ def validate_get_map(environ, dataset, dataset_styles):
 
     return query_valid
 
+
 def validate_get_colorbar(environ):
     """\
     Validate GetColorbar call.
@@ -352,6 +354,9 @@ def validate_get_colorbar(environ):
     else:
         center_labels = False
 
+    # TODO: return real values
+    query_valid = {}
+    return query_valid
 
 def validate(environ, dataset, styles):
     """\
