@@ -1127,7 +1127,7 @@ class WMSResponse(BaseResponse):
             # see if an OutsideGridException is thrown
             try:
                 (j0, j1, jstep), (i0, i1, istep) = \
-                self._find_slices(lon, lat, dlon, bbox, cyclic, (1, 1), size)
+                self._find_slices(lon, lat, dlon, bbox, cyclic, size)
             except OutsideGridException:
                 lon += dlon
                 cnt_window += 1
