@@ -214,7 +214,7 @@ def time_slice(time, grid, dataset):
         if ' since ' in dim.attributes.get('units', ''):
             calendar = dim.attributes.get('calendar', 'standard')
             try:
-                values = np.array(np.asarray(dim))
+                values = np.array(np.asarray(dim[Ellipsis]))
                 break
             except:
                 pass
