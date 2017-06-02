@@ -246,7 +246,7 @@ def time_slice(time, grid, dataset):
                     # Require almost exact match
                     l = np.isclose(values, instant)
                     # Convert array to index
-                    l = np.where(l == True)[0][0]
+                    l = int(np.where(l == True)[0][0])
                 else:
-                    l = (np.abs(values-instant)).argmin()
+                    l = int((np.abs(values-instant)).argmin())
     return l
