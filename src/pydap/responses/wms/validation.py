@@ -92,6 +92,26 @@ class WMSException(Exception):
         self.status_code = status_code
         self.error_code = error_code
 
+def parse_styles(styles_str):
+    """Parse styles string into list of dicts."""
+    if len(styles_str) > 0:
+        styles = styles_str.split(',')
+    else:
+        styles = len(layers)*['']
+
+    styles_parsed = []
+    for style in styles: 
+        if len(style) > 0: 
+            style_items_parsed = {}
+            style_items = style.split(';') 
+            for style_item in style_items: 
+                key, value = style_item.split('=') 
+                style_items_parsed[key] = value
+            styles_parsed.append(style_items_parsed)
+        else:
+            styles_parsed.append({})
+    return styles_parsed
+
 def validate_wms(environ):
     """\
     Common validation for WMS calls.
@@ -243,10 +263,8 @@ def validate_get_map(environ, dataset, dataset_styles):
     layers_str = query.get('layers')
     layers = layers_str.split(',')
     styles_str = unquote(query.get('styles'))
-    if len(styles_str) > 0:
-        styles = styles_str.split(',')
-    else:
-        styles = len(layers)*['']
+    styles = parse_styles(styles_str)
+
     if len(layers) != len(styles):
         msg = 'LAYERS=%s and STYLES=%s not compatible' % \
               (layers_str, styles_str)
@@ -264,7 +282,7 @@ def validate_get_map(environ, dataset, dataset_styles):
             error_code = 'LayerNotDefined'
             raise WMSException(msg, 400, error_code)
         defined_styles_layer = defined_styles[layer]
-        if style != '' and style not in defined_styles:
+        if style != '' and style not in defined_styles_layer:
             msg = '%s in STYLE=%s not defined; valid values=%s' \
                   % (style, styles_str, defined_styles_layer)
             error_code = 'StylesNotDefined'
