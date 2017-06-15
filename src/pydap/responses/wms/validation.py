@@ -271,6 +271,8 @@ def validate_get_map(environ, dataset, dataset_styles):
         raise WMSException(msg, 400)
 
     # Check if layers and styles are defined
+    # TODO: We should allow non-defined styles
+    """
     defined_layers = build_layers(dataset, dataset_styles)
     layer_names = [l['name'] for l in defined_layers]
     defined_styles = {l['name']: l['styles'] for l in \
@@ -287,6 +289,7 @@ def validate_get_map(environ, dataset, dataset_styles):
                   % (style, styles_str, defined_styles_layer)
             error_code = 'StylesNotDefined'
             raise WMSException(msg, 400, error_code)
+    """
 
     query_valid['layers'] = layers
     query_valid['styles'] = styles
