@@ -82,7 +82,8 @@ def get_time(grid):
 def get_vertical(grid):
     for dim in grid.maps.values():
         if isvertical(dim):
-            return np.asarray(dim[:])
+            return dim
+            #return np.asarray(dim[:])
 
     return None
 

@@ -167,8 +167,8 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
       <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat()}" nearestValue="0">
         ${','.join([t.isoformat() for t in time])}
       </Dimension>
-      <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z)[0]}" multipleValues="0" nearestValue="0">
-        ${','.join([str(zz) for zz in np.asarray(z)])}
+      <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z[:])[0]}" multipleValues="0" nearestValue="0">
+        ${','.join([str(zz) for zz in np.asarray(z[:])])}
       </Dimension>
       <Style py:for="style in layer['styles']">
         <?python
@@ -1675,7 +1675,7 @@ class WMSResponse(BaseResponse):
                 levels = gridutils.get_vertical(dataset[layer])
                 if levels is not None and 'levels' in items:
                     output[layer]['levels'] = {}
-                    output[layer]['levels']['values'] = np.asarray(levels).tolist()
+                    output[layer]['levels']['values'] = np.asarray(levels[:]).tolist()
                     if 'units' in levels.attributes:
                         output[layer]['levels']['units'] = levels.attributes['units']
                     if 'long_name' in levels.attributes:
