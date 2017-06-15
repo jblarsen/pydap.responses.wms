@@ -92,7 +92,7 @@ class WMSException(Exception):
         self.status_code = status_code
         self.error_code = error_code
 
-def parse_styles(styles_str):
+def parse_styles(styles_str, layers):
     """Parse styles string into list of dicts."""
     if len(styles_str) > 0:
         styles = styles_str.split(',')
@@ -263,7 +263,7 @@ def validate_get_map(environ, dataset, dataset_styles):
     layers_str = query.get('layers')
     layers = layers_str.split(',')
     styles_str = unquote(query.get('styles'))
-    styles = parse_styles(styles_str)
+    styles = parse_styles(styles_str, layers)
 
     if len(layers) != len(styles):
         msg = 'LAYERS=%s and STYLES=%s not compatible' % \
