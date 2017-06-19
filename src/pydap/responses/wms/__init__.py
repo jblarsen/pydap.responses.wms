@@ -147,8 +147,9 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
           now = datetime.datetime.utcnow()
           epoch = datetime.datetime(1970, 1, 1)
           now_secs = (now - epoch).total_seconds()
-          time_secs = np.array([(t-epoch).total_seconds() for t in time])
-          idx_nearest = np.abs(time_secs-now_secs).argmin()
+          if time is not None:
+              time_secs = np.array([(t-epoch).total_seconds() for t in time])
+              idx_nearest = np.abs(time_secs-now_secs).argmin()
 
           # Vertical coordinate variable
           z = layer['vertical']
