@@ -18,7 +18,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 import sys
 from PIL import Image
-from StringIO import StringIO
+from io import BytesIO
 import requests
 import owslib.wms
 from owslib.wms import WebMapService
@@ -33,7 +33,7 @@ def check_blank(content):
     http://stackoverflow.com/questions/1110403/how-can-i-check-for-a-blank-image-in-qt-or-pyqt
     """
  
-    im = Image.open(StringIO(content))
+    im = Image.open(BytesIO(content))
     # we need to force the image to load (PIL uses lazy-loading)
     # otherwise get the following error: AttributeError: 'NoneType' object has no attribute 'bands'
     im.load() 
@@ -53,7 +53,7 @@ def get_default_parameters():
     params = {
         'TRANSPARENT': 'TRUE',
         'SERVICE': 'WMS',
-        'VERSION': '1.1.1',
+        'VERSION': '1.3.0',
         'REQUEST': 'GetMap',
         'STYLES': '',
         'FORMAT': 'image/png',
@@ -89,7 +89,7 @@ def get_params_and_bounding_box(url, layer_name, crs):
     params = get_default_parameters()
     
     # get bounding box for the layer
-    wms = WebMapService(url, version='1.1.1')
+    wms = WebMapService(url, version='1.3.0')
     bounds = wms[layer_name].boundingBoxWGS84
  
     # set the custom parameters for the layer
@@ -103,13 +103,13 @@ def get_params_and_bounding_box(url, layer_name, crs):
  
 def get_time(url, layer_name):
     # get bounding box for the layer
-    wms = WebMapService(url, version='1.1.1')
+    wms = WebMapService(url, version='1.3.0')
     return wms[layer_name].timepositions
  
 def get_crs(url, layer_name):
     """Return supported CRS' for this layer."""
     # get list of acceptable CRS' for the layer
-    wms = WebMapService(url, version='1.1.1')
+    wms = WebMapService(url, version='1.3.0')
     crs_list = wms[layer_name].crsOptions
     return crs_list
 
@@ -120,14 +120,14 @@ def get_image(url, layer_name, check_blank=False):
     """
  
     # get list of acceptable CRS' for the layer
-    wms = WebMapService(url, version='1.1.1')
+    wms = WebMapService(url, version='1.3.0')
     crs_list = wms[layer_name].crsOptions
     print('Requesting these crs\' %s' % crs_list)
 
     for crs in crs_list:
         params = get_params_and_bounding_box(url, layer_name, crs)
         resp = requests.get(url, params=params)
-        print "The full URL request is '%s'" % resp.url
+        print("The full URL request is '%s'" % resp.url)
  
         # this should be 200
         print("The HTTP status code is: %i" % resp.status_code)
@@ -151,7 +151,7 @@ def get_layers(url):
     """
     Get a list of all the WMS layers available on the server.
     """
-    wms = WebMapService(url, version='1.1.1')
+    wms = WebMapService(url, version='1.3.0')
     layer_names = list(wms.contents)
     return layer_names
     
@@ -162,7 +162,7 @@ def request_layers(url):
     """
     layer_names = get_layers(url)
     for l in layer_names:
-        print "Checking '%s'..." % l
+        print("Checking '%s'..." % l)
         get_image(url, l, check_blank=True)
     
 if __name__ == "__main__":

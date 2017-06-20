@@ -84,15 +84,12 @@ def _bbox_in_bbox(bbox_outer, bbox):
     if _bbox_points_in_bbox(bbox_outer, bbox):
         return True
     if _bbox_points_in_bbox(bbox, bbox_outer):
-        #print 'b', bbox
         return True
     if (bbox_outer[1] < south and bbox_outer[3] > north) and \
        (west < bbox_outer[0] < east and west < bbox_outer[2] < east):
-        #print 'c', bbox
         return True
     if (south < bbox_outer[1] < north and south < bbox_outer[3] < north) and \
        (bbox_outer[0] < west and bbox_outer[2] > east):
-        #print 'd', bbox
         return True
     return False
 
@@ -151,4 +148,4 @@ if __name__ == '__main__':
     print('Finding in area %s' % area)
     bboxes = all_bbox2tile_bboxes(area, maxzoom, tilesize, nmax)
     for k, v in bboxes.iteritems():
-        print k, len(v)
+        print(k, len(v))

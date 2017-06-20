@@ -5,8 +5,7 @@ Various useful utilities for testing the WMS server.
 # Standard library imports
 import os
 import urllib
-import urlparse
-import StringIO
+import io
 import cProfile
 import time
 import timeit
@@ -53,14 +52,14 @@ class openURL_mock:
         env = self.base_env.copy()
         env['QUERY_STRING'] = data
         result = self.handler(env, start_response_mock)
-        u = StringIO.StringIO(result[0])
+        u = io.StringIO(result[0])
         return u
 
 def start_response_mock(status, response_headers, exc_info=None):
     """Mock for start_response method."""
     if status != '200 OK':
-        print status
-        print response_headers
+        print(status)
+        print(response_headers)
         raise
 
 class WMSResponse(object):
@@ -84,7 +83,7 @@ class WMSResponse(object):
                          'SERVER_PROTOCOL': 'HTTP/1.1'}
         self.base_query = {'SERVICE': 'WMS',
                            'REQUEST': 'GetMap',
-                           'VERSION': '1.1.1',
+                           'VERSION': '1.3.0',
                            'STYLES': '',
                            'FORMAT': 'image/png',
                            'TRANSPARENT': 'true',
@@ -178,7 +177,7 @@ class WMSResponse(object):
         URL returns a blank image when at the full extent
         """
         # get list of acceptable CRS' for the layer
-        wms = WebMapService(url, version='1.1.1')
+        wms = WebMapService(url, version='1.3.0')
         crs_list = wms[layer].crsOptions
         print('Requesting these crs\' %s' % crs_list)
         for crs in crs_list:
