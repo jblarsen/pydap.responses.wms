@@ -266,7 +266,7 @@ def validate_get_map(environ, dataset, dataset_styles):
     styles = parse_styles(styles_str, layers)
 
     if len(layers) != len(styles):
-        msg = 'LAYERS=%s and STYLES=%s not compatible' % \
+        msg = 'LAYERS=%s and STYLES=%s do not have same length' % \
               (layers_str, styles_str)
         raise WMSException(msg, 400)
 
