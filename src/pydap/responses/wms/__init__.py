@@ -1442,18 +1442,21 @@ class WMSResponse(BaseResponse):
             adims = avar.dimensions
             acoords = avar.coordinates.split()
             assert len(acoords) == 2
-            adata = np.asarray(avar[l,:,:])[:]
-            nt, nanno, nstr = adata.shape
-            assert nt == 1
-            adata = adata.reshape((nanno, nstr))
+            nt, ny, nx = avar.array.shape
+            adata = np.asarray(avar.array.data)[l,0:ny:1,0:nx:1]
+            nanno, nstr = adata.shape
+            aadata = np.empty((nanno,), dtype=np.object)
+            for inanno in range(nanno):
+                ads = [bs.decode('utf-8') for bs in adata[inanno,:]]
+                aadata[inanno] = ''.join(ads).strip()
 
-            alat = np.asarray(dataset[acoords[0]][l,:])[:]
-            alon = np.asarray(dataset[acoords[1]][l,:])[:]
+            alat = np.asarray(dataset[acoords[0]].array.data)[l,:]
+            alon = np.asarray(dataset[acoords[1]].array.data)[l,:]
             alat = alat.reshape((nanno))
             alon = alon.reshape((nanno))
             do_proj, p_base, p_query = self._get_proj(crs)
             x, y = pyproj.transform(p_base, p_query, alon, alat)
-            _plot_annotations(adata, y, x, ax)
+            _plot_annotations(aadata, y, x, ax)
 
 
     def _get_capabilities(self, environ):

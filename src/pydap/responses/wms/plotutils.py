@@ -268,7 +268,8 @@ def mslext2text(ncchars):
     format
     """
     colors = {'H': 'blue', 'L': 'red'}
-    ncstring = str(netCDF4.chartostring(ncchars)).strip()
+    #ncstring = str(netCDF4.chartostring(ncchars)).strip()
+    ncstring = ncchars
     if ':' in ncstring:
         sym, val = ncstring.split(':')
         hlt = sym + '\n$\\regular^{\,'+val+'}}$'
