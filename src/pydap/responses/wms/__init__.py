@@ -168,8 +168,8 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
       <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat()}" nearestValue="0">
         ${','.join([t.isoformat() for t in time])}
       </Dimension>
-      <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z[:])[0]}" multipleValues="0" nearestValue="0">
-        ${','.join([str(zz) for zz in np.asarray(z[:])])}
+      <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z.data[:])[0]}" multipleValues="0" nearestValue="0">
+        ${','.join([str(zz) for zz in np.asarray(z.data[:])])}
       </Dimension>
       <Style py:for="style in layer['styles']">
         <?python
@@ -498,7 +498,7 @@ class WMSResponse(BaseResponse):
             try:
                 actual_range = grid.attributes['actual_range']
             except KeyError:
-                data = gridutils.fix_data(np.asarray(grid.array[:]), grid.attributes)
+                data = gridutils.fix_data(np.asarray(grid.data[0].var[:]), grid.attributes)
                 actual_range = np.min(data), np.max(data)
             if self.cache:
                 key = (grid.id, 'actual_range')
@@ -1033,41 +1033,41 @@ class WMSResponse(BaseResponse):
         for grid in grids:
             # The line below is a performance bottleneck.
             if gridutils.get_vertical(grid) is None:
-                gdata = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep])
+                gdata = np.asarray(grid.data[0].var[l,j0:j1:jstep,i0:i1:istep])
                 # FIXME: Does not work for NCA's. The line below does but is inefficient
                 #gdata = np.asarray(grid.array)[l,j0:j1:jstep,i0:i1:istep]
                 if cyclic:
                     if len(lon.shape) == 1:
                         gdata = np.ma.concatenate((
-                            gdata, np.asarray(grid.array[l,j0:j1:jstep,0:1])), -1)
+                            gdata, np.asarray(grid.data[0].var[l,j0:j1:jstep,0:1])), -1)
                     else:
                         if i0 < 0:
                             # The leftmost bound is to the left of the grid origin
                             ii = lon.shape[1] + i0
-                            gdata = np.ma.concatenate((grid.array[l,j0:j1:jstep,ii:-1:istep], 
+                            gdata = np.ma.concatenate((grid.data[0].var[l,j0:j1:jstep,ii:-1:istep], 
                                                        gdata), axis=-1)
                         if i1 > lon.shape[1]:
                             # The rightmost bound is to the right of the grid extent
                             di = i1 - lon.shape[1]
                             gdata = np.ma.concatenate((gdata,
-                                                       grid.array[l,j0:j1:jstep,0:di:istep]), axis=-1)
+                                                       grid.data[0].var[l,j0:j1:jstep,0:di:istep]), axis=-1)
             else:
-                gdata = np.asarray(grid.array[l,level,j0:j1:jstep,i0:i1:istep])
+                gdata = np.asarray(grid.data[0].var[l,level,j0:j1:jstep,i0:i1:istep])
                 if cyclic:
                     if len(lon.shape) == 1:
                         gdata = np.ma.concatenate((
-                            gdata, np.asarray(grid.array[l,level,j0:j1:jstep,0:1])), -1)
+                            gdata, np.asarray(grid.data[0].var[l,level,j0:j1:jstep,0:1])), -1)
                     else:
                         if i0 < 0:
                             # The leftmost bound is to the left of the grid origin
                             ii = lon.shape[1] + i0
-                            gdata = np.ma.concatenate((grid.array[l,level,j0:j1:jstep,ii:-1:istep], 
+                            gdata = np.ma.concatenate((grid.data[0].var[l,level,j0:j1:jstep,ii:-1:istep], 
                                                        gdata), axis=-1)
                         if i1 > lon.shape[1]:
                             # The rightmost bound is to the right of the grid extent
                             di = i1 - lon.shape[1]
                             gdata = np.ma.concatenate((gdata,
-                                                       grid.array[l,level,j0:j1:jstep,0:di:istep]), axis=-1)
+                                                       grid.data[0].var[l,level,j0:j1:jstep,0:di:istep]), axis=-1)
 
             data.append(gdata)
 
@@ -1171,9 +1171,9 @@ class WMSResponse(BaseResponse):
             for grid in grids:
                 attrs = grid.attributes
                 if gridutils.get_vertical(grid) is None:
-                    values = np.asarray(grid.array[l,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
+                    values = np.asarray(grid.data[0].var[l,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
                 else:
-                    values = np.asarray(grid.array[l,level,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
+                    values = np.asarray(grid.data[0].var[l,level,j0:j1:jstep,i0:i1:istep]).squeeze().flatten()
                 if 'missing_value' in attrs:
                     missing_value = attrs['missing_value']
                     values = np.ma.masked_equal(values, missing_value)
@@ -1455,7 +1455,10 @@ class WMSResponse(BaseResponse):
             alat = alat.reshape((nanno))
             alon = alon.reshape((nanno))
             do_proj, p_base, p_query = self._get_proj(crs)
-            x, y = pyproj.transform(p_base, p_query, alon, alat)
+            if do_proj:
+                x, y = pyproj.transform(p_base, p_query, alon, alat)
+            else:
+                x, y = alon, alat
             _plot_annotations(aadata, y, x, ax)
 
 
