@@ -4,9 +4,9 @@ import datetime
 import re
 import operator
 
-import numpy as np
 import iso8601
-import netcdftime
+import numpy as np
+import netCDF4
 
 from pydap.model import GridType
 from pydap.lib import walk
@@ -19,7 +19,7 @@ def get_lon(grid, dataset):
     def check_attrs(var):
         if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
             var.attributes.get('standard_name', '') == 'longitude'):
-            return np.asarray(var[:])
+            return np.asarray(var.data[:])
         #if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
         #    var.attributes.get('axis', '').lower() == 'x' or
         #    var.attributes.get('standard_name', '') == 'longitude'):
@@ -28,14 +28,14 @@ def get_lon(grid, dataset):
     # check maps first
     for dim in grid.maps.values():
         if check_attrs(dim) is not None:
-            return np.asarray(dim[:])
+            return np.asarray(dim.data[0])
 
     # check curvilinear grids
     if hasattr(grid, 'coordinates'):
         coords = grid.coordinates.split()
         for coord in coords:
             if coord in dataset and check_attrs(dataset[coord].array) is not None:
-                return np.asarray(dataset[coord].array[:])
+                return np.asarray(dataset[coord].data[0])
 
     return None
 
@@ -47,19 +47,19 @@ def get_lat(grid, dataset):
         #    return var
         if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
             var.attributes.get('standard_name', '') == 'latitude'):
-            return np.asarray(var[:])
+            return np.asarray(var.data[:])
 
     # check maps first
     for dim in grid.maps.values():
         if check_attrs(dim) is not None:
-            return np.asarray(dim[:])
+            return np.asarray(dim.data[0])
 
     # check curvilinear grids
     if hasattr(grid, 'coordinates'):
         coords = grid.coordinates.split()
         for coord in coords:
             if coord in dataset and check_attrs(dataset[coord].array) is not None:
-                return np.asarray(dataset[coord].array[:])
+                return np.asarray(dataset[coord].data[0])
 
     return None
 
@@ -68,8 +68,7 @@ def get_time(grid):
         if ' since ' in dim.attributes.get('units', ''):
             calendar = dim.attributes.get('calendar', 'standard')
             try:
-                utime = netcdftime.utime(dim.units, calendar=calendar)
-                tm = utime.num2date(np.asarray(dim[:]))
+                tm = netCDF4.num2date(np.asarray(dim.data[0]), dim.units, calendar=calendar)
                 # Discard microseconds
                 for i in range(len(tm)):
                     tm[i] = tm[i].replace(microsecond=0)
@@ -211,15 +210,16 @@ def time_slice(time, grid, dataset):
     else:
         find_nearest = False
 
+    values = None
     for dim in grid.maps.values():
         if ' since ' in dim.attributes.get('units', ''):
             calendar = dim.attributes.get('calendar', 'standard')
             try:
-                values = np.array(np.asarray(dim[Ellipsis]))
+                values = np.array(np.asarray(dim.data[Ellipsis]))
                 break
             except:
                 pass
-    if len(values.shape) == 0:
+    if values is None or len(values.shape) == 0:
         # Input field has no time dimension
         l = Ellipsis
     else:
@@ -237,8 +237,7 @@ def time_slice(time, grid, dataset):
                 l = np.where(l == True)[0][0]
             else:
                 instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
-                utime = netcdftime.utime(dim.units, calendar=calendar)
-                instant = utime.date2num(instant)
+                instant = netCDF4.date2num(instant, dim.units, calendar=calendar)
                 # TODO: Calculate index directly
                 epoch = values[0]
                 values = values - epoch
