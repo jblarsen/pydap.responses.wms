@@ -84,7 +84,7 @@ MIN_HEIGHT=0
 MAX_HEIGHT=8192
 DEFAULT_CRS = 'EPSG:4326'
 WMS_VERSION = '1.3.0'
-SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857', 'EPSG:900913', 'EPSG:3785', 'EPSG:3395']
+SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857'] #, 'EPSG:3413', 'EPSG:3031']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
 <WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms"
@@ -558,7 +558,6 @@ class WMSResponse(BaseResponse):
 
             # Projection
             crs = query.get('crs', DEFAULT_CRS)
-            if crs == 'EPSG:900913': crs = 'EPSG:3785'
 
             # Reorder bounding box for EPSG:4326 which has lat/lon ordering
             if crs == 'EPSG:4326':
@@ -1763,6 +1762,11 @@ def _plot_annotations(data, y, x, ax):
 def build_layers(dataset, supported_styles):
     grids = [grid for grid in walk(dataset, GridType) if \
             gridutils.is_valid(grid, dataset)]
+
+    # Do not display grids containing these data types
+    IGNORED_DTYPES = ['|S1'] # TODO: Maybe more to come
+    grids = [grid for grid in grids if str(grid.dtype) not in IGNORED_DTYPES]
+
     # Store information for regular layers
     layers = []
     for grid in grids:
@@ -1775,6 +1779,7 @@ def build_layers(dataset, supported_styles):
         # Spatial information
         lon = np.asarray(gridutils.get_lon(grid, dataset)[:])
         lat = np.asarray(gridutils.get_lat(grid, dataset)[:])
+
         minx, maxx = np.min(lon), np.max(lon)
         miny, maxy = np.min(lat), np.max(lat)
         bbox = [minx, miny, maxx, maxy]

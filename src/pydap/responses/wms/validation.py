@@ -56,7 +56,7 @@ MAX_HEIGHT=8192
 
 DEFAULT_CRS = 'EPSG:4326'
 
-SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857', 'EPSG:900913', 'EPSG:3785', 'EPSG:3395']
+SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857'] #, 'EPSG:3413', 'EPSG:3031']
 SUPPORTED_REQUESTS = ['GetMap', 'GetCapabilities', 'GetMetadata', 'GetColorbar']
 SUPPORTED_FORMATS = ['image/png']
 SUPPORTED_EXCEPTIONS = ['XML']
@@ -232,9 +232,6 @@ def validate_get_map(environ, dataset, dataset_styles):
               (crs, SUPPORTED_CRS)
         error_code = 'InvalidCRS'
         raise WMSException(msg, 400, error_code)
-    # EPSG:900913 and EPSG:3785 are identical
-    if crs == 'EPSG:900913':
-        crs = 'EPSG:3785'
     query_valid['crs'] = crs
 
     # Check BBOX
