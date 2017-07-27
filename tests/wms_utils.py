@@ -18,7 +18,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 import sys
 from PIL import Image
-from io import BytesIO
+from io import BytesIO, StringIO
 import requests
 import owslib.wms
 from owslib.wms import WebMapService
@@ -33,7 +33,8 @@ def check_blank(content):
     http://stackoverflow.com/questions/1110403/how-can-i-check-for-a-blank-image-in-qt-or-pyqt
     """
  
-    im = Image.open(BytesIO(content))
+    bio = BytesIO(content)
+    im = Image.open(bio)
     # we need to force the image to load (PIL uses lazy-loading)
     # otherwise get the following error: AttributeError: 'NoneType' object has no attribute 'bands'
     im.load() 
@@ -64,23 +65,20 @@ def get_default_parameters():
  
 def get_bounding_box(bounds, crs):
     base_crs = 'EPSG:4326'
-    if crs == 'EPSG:900913': crs = 'EPSG:3785'
     if crs != base_crs:
         p_base = pyproj.Proj(init=base_crs)
         p_query = pyproj.Proj(init=crs)
-        try:
-            llcrn = pyproj.transform(p_base, p_query, bounds[0], bounds[1])
-            lrcrn = pyproj.transform(p_base, p_query, bounds[2], bounds[1])
-            ulcrn = pyproj.transform(p_base, p_query, bounds[0], bounds[3])
-            urcrn = pyproj.transform(p_base, p_query, bounds[2], bounds[3])
-            xmin = min(llcrn[0], ulcrn[0])
-            xmax = min(lrcrn[0], urcrn[0])
-            ymin = min(llcrn[1], lrcrn[1])
-            ymax = min(ulcrn[1], urcrn[1])
-            bounds = (xmin, ymin, xmax, ymax, crs)
-            bbox = ",".join([str(b) for b in bounds[:4]])
-        except:
-            bbox = ''
+
+        llcrn = pyproj.transform(p_base, p_query, bounds[0], bounds[1])
+        lrcrn = pyproj.transform(p_base, p_query, bounds[2], bounds[1])
+        ulcrn = pyproj.transform(p_base, p_query, bounds[0], bounds[3])
+        urcrn = pyproj.transform(p_base, p_query, bounds[2], bounds[3])
+        xmin = min(llcrn[0], ulcrn[0])
+        xmax = min(lrcrn[0], urcrn[0])
+        ymin = min(llcrn[1], lrcrn[1])
+        ymax = min(ulcrn[1], urcrn[1])
+        bounds = (xmin, ymin, xmax, ymax, crs)
+        bbox = ",".join([str(b) for b in bounds[:4]])
     else:
         bbox = ",".join([str(b) for b in bounds[:4]])
     return bbox
