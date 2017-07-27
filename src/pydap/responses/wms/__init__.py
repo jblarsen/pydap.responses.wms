@@ -609,7 +609,7 @@ class WMSResponse(BaseResponse):
                     try:
                         grid = reduce(operator.getitem, names)
                     except KeyError as error:
-                        raise HTTPBadRequest('Nonexistent LAYER "%s"' % error.message)
+                        raise HTTPBadRequest('Nonexistent LAYER "%s"' % str(error))
                     if not gridutils.is_valid(grid, self.dataset):
                         raise HTTPBadRequest('Invalid LAYERS "%s"' % layers)
 
