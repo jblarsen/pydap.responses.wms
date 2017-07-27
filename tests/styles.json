@@ -1,0 +1,348 @@
+{
+    "surface_air_pressure": [
+        {
+            "legend": "SeaLevelPressure_hPa_BGYR_13colors",
+            "plot_method": "contour"
+        }
+    ],
+    "air_pressure_at_sea_level": [
+        {
+            "legend": "SeaLevelPressure_hPa_BGYR_13colors",
+            "plot_method": "contour"
+        }
+    ],
+    "wind_speed": [
+        {
+            "legend": "Wind_ms_BGYR_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Wind_bf_kn_YRP_13colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Wind_kn_YRP_18colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Wind_ms_YRP_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Wind_ms_YRP_11colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Wind_ms_BGYRP_11colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Wind_ms_BGYRP_11colors_1.1",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Wind_ms_BGYRP_11colors_1.0",
+            "plot_method": "contourf"
+        }
+    ],
+    "specific_humidity": [
+        {
+            "legend": "Humidity_kg_kg_WYR_7colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "precipitation_flux": [
+        {
+            "legend": "Precip_mm_per_h_YRP_11colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Precip_mm_per_h_GBP_9colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "air_temperature": [
+        {
+            "legend": "AirTemp_C_BGYR_13colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "AirTemp_C_BGYR_19colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "AirTempCold_C_BGYR_13colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "AirTempCold_C_BGYR_19colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "AirTempWarm_C_BGYR_19colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "AirTempWarm_C_BGYR_13colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "visibility_in_air": [
+        {
+            "legend": "AirVisibility_km_RYG_11colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "AirVisibility_km_RYG_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "AirVisibility_km_RYG_3colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "cloud_area_fraction": [
+        {
+            "legend": "CloudCover_km_WGB_10colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_surface_wave_significant_height": [
+        {
+            "legend": "Hs_m_GBP_9colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Hs_m_GBP_20colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "HsArctic_m_GBP_20colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Hs_ss_JET_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Hs_m_JET_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Hs_m_GBP_11colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Hs_m_GBP_11colors_denmark",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Hs_m_GBP_12colors_denmark",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_surface_wave_mean_period_from_variance_spectral_density_inverse_frequency_moment": [
+        {
+            "legend": "MeanPeriod_s_RGB_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "MeanPeriod_s_RGB_19colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_ice_area_fraction": [
+        {
+            "legend": "IceConcentration_BW_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "IceConcentration_Gray_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "IceConcentration_10colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_ice_thickness": [
+        {
+            "legend": "IceThickness_CM_BGYR_13colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "IceThickness_BGYR_14colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_surface_height": [
+        {
+            "legend": "SeaLvl_cm_BWR_10colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaLvl_cm_BWR_20colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaLvl_m_BWR_13colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaLvl_m_BWR_15colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaLvl_m_BWR_20colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_surface_temperature": [
+        {
+            "legend": "SeaTemp_C_BGYR_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaTempArctic_C_BGYR_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaTempWarm_C_BGYR_14colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_water_temperature": [
+        {
+            "legend": "SeaTemp_C_BGYR_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaTempArctic_C_BGYR_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "SeaTempWarm_C_BGYR_14colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_water_speed": [
+        {
+            "legend": "CurrentArctic_kn_GYR_17colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "CurrentArctic_kn_GYR_9colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Current_kn_GYR_19colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Current_kn_GYR_11colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Current_cms_GYR_9colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Current_ms_GYR_9colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "CurrentArctic_kn_WGYR_11colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "Current_kn_WGYR_11colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_water_salinity": [
+        {
+            "legend": "PrSal_psu_GB_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "PrSal_psu_GB_20colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "PrSalArctic_psu_GB_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "PrSalArctic_psu_GB_16colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "sea_surface_salinity": [
+        {
+            "legend": "PrSal_psu_GB_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "PrSal_psu_GB_20colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "PrSalArctic_psu_GB_14colors",
+            "plot_method": "contourf"
+        },
+        {
+            "legend": "PrSalArctic_psu_GB_16colors",
+            "plot_method": "contourf"
+        }
+    ],
+    "wind": [
+        {
+            "legend": "Wind_ms_BGYR_10colors",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        },
+        {
+            "legend": "Wind_bf_kn_YRP_13colors",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        },
+        {
+            "legend": "Wind_kn_YRP_18colors",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        },
+        {
+            "legend": "Wind_ms_YRP_10colors",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        },
+        {
+            "legend": "Wind_ms_YRP_11colors",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        },
+        {
+            "legend": "Wind_ms_BGYRP_11colors",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        },
+        {
+            "legend": "Wind_ms_BGYRP_11colors_1.1",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        },
+        {
+            "legend": "Wind_ms_BGYRP_11colors_1.0",
+            "plot_method": "color_quiver1",
+            "vector_spacing": "80",
+            "vector_offset": "20"
+        }
+    ]
+}
