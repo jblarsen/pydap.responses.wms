@@ -16,6 +16,7 @@ try:
     import cPickle as pickle
 except ImportError:
     import pickle
+import sys
 import time
 import calendar
 from email.utils import parsedate
@@ -31,7 +32,7 @@ except ImportError:
 from paste.request import construct_url, parse_dict_querystring
 from webob import Response
 from webob.dec import wsgify
-from webob.exc import HTTPBadRequest, HTTPNotModified
+from webob.exc import HTTPBadRequest, HTTPNotModified, HTTPInternalServerError
 from paste.util.converters import asbool
 import numpy as np
 from scipy import interpolate
@@ -193,7 +194,6 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
 </Capability>
 </WMS_Capabilities>"""
 
-
 class OutsideGridException(Exception):
     pass
 
@@ -214,6 +214,10 @@ class WMSResponse(BaseResponse):
     #@profile
     @wsgify
     def __call__(self, req):
+        return self.call(req)
+
+    #@profile
+    def call(self, req):
         environ = req.environ
 
         # Init colors and styles class instances on first invokation
@@ -366,6 +370,7 @@ class WMSResponse(BaseResponse):
     def _init_cache(self, config):
         """Set class variable "cacheRegion" on first call"""
         if not hasattr(WMSResponse, 'cacheRegion'):
+            # redis cache is disabled by default
             redis = asbool(config.get('pydap.responses.wms.redis', 'false'))
             if not redis:
                 WMSResponse.cacheRegion = None
@@ -382,10 +387,21 @@ class WMSResponse(BaseResponse):
                 )
         # Setup local caches for this process
         if not hasattr(WMSResponse, 'localCache'):
-            WMSResponse.localCache = {}
-            WMSResponse.localCache['figures'] = LRU(1000)
-            WMSResponse.localCache['pyproj'] = LRU(1000)
-            WMSResponse.localCache['project_data'] = LRU(5)
+            # local cache is enabled by default
+            localCache = asbool(config.get('pydap.responses.wms.localCache',
+                                'true'))
+            if not localCache:
+                WMSResponse.localCache = None
+            else:
+                WMSResponse.localCache = {
+                    'figures': LRU(int(config.get(
+                      'pydap.responses.wms.localCache.size.figures', 20))),
+                    'pyproj': LRU(int(config.get(
+                      'pydap.responses.wms.localCache.size.projections', 20))),
+                    'project_data': LRU(int(config.get(
+                      'pydap.responses.wms.localCache.size.projected_coords',
+                       2)))
+                }
 
     def _get_colorbar(self, environ):
         # Get query string parameters
@@ -498,8 +514,19 @@ class WMSResponse(BaseResponse):
             try:
                 actual_range = grid.attributes['actual_range']
             except KeyError:
-                data = gridutils.fix_data(np.asarray(grid.data[0].var[:]), grid.attributes)
-                actual_range = np.min(data), np.max(data)
+                # Handle one timestep (or whatever the first dimension is)
+                # at a time to avoid excessive memory usage
+                if len(grid.shape) == 0 or grid.shape[0] == 0:
+                    raise HTTPInternalServerError('Invalid input grid')
+                n = grid.shape[0]
+                _min, _max = sys.float_info.max, sys.float_info.min
+                for i in range(n):
+                    data = gridutils.fix_data(np.asarray(
+                               grid.data[0].var[i,...]), grid.attributes)
+                    min_i, max_i = np.min(data), np.max(data)
+                    _min = min(_min, min_i)
+                    _max = max(_max, max_i)
+                actual_range = _min, _max
             if self.cache:
                 key = (grid.id, 'actual_range')
                 self.cache.set(key, actual_range)
@@ -660,7 +687,8 @@ class WMSResponse(BaseResponse):
             # is local to this process and is the "figures" dict attribute on
             # the WMSResponse class while the second level is in the redis cache
             
-            if 'figures' in self.localCache and figsize in self.localCache['figures'].keys():
+            if self.localCache and 'figures' in self.localCache and \
+                    figsize in self.localCache['figures'].keys():
                 fig = pickle.loads(self.localCache['figures'][figsize])
                 ax = fig.get_axes()[0]
             else:
@@ -677,7 +705,8 @@ class WMSResponse(BaseResponse):
                     if self.cache:
                         key = (figsize, 'figure')
                         self.cache.set(key, fig)
-            if figsize not in self.localCache['figures'].keys():
+            if self.localCache and figsize not in \
+                    self.localCache['figures'].keys():
                 self.localCache['figures'][figsize] = pickle.dumps(fig, -1)
 
             # Set transparent background; found through http://sparkplot.org/browser/sparkplot.py.
@@ -786,7 +815,8 @@ class WMSResponse(BaseResponse):
             # We use cached versions of the projection object if possible.
             # It is safe to store these forever.
             key = (base_crs, 'pyproj')
-            if 'pyproj' in self.localCache and key in self.localCache['pyproj'].keys():
+            if self.localCache and 'pyproj' in self.localCache and \
+                    key in self.localCache['pyproj'].keys():
                 p_base = self.localCache['pyproj'][key]
             else:
                 try:
@@ -799,11 +829,12 @@ class WMSResponse(BaseResponse):
                     p_base = pyproj.Proj(init=base_crs)
                     if self.cache:
                         self.cache.set(key, p_base)
-            if key not in self.localCache['pyproj'].keys():
+            if self.localCache and key not in self.localCache['pyproj'].keys():
                 self.localCache['pyproj'][key] = p_base
              
             key = (crs, 'pyproj')
-            if 'pyproj' in self.localCache and key in self.localCache['pyproj'].keys():
+            if self.localCache and 'pyproj' in self.localCache and key in \
+                    self.localCache['pyproj'].keys():
                 p_query = self.localCache['pyproj'][key]
             else:
                 try:
@@ -816,7 +847,7 @@ class WMSResponse(BaseResponse):
                     p_query = pyproj.Proj(init=crs)
                     if self.cache:
                         self.cache.set(key, p_query)
-            if key not in self.localCache['pyproj'].keys():
+            if self.localCache and key not in self.localCache['pyproj'].keys():
                 self.localCache['pyproj'][key] = p_query
         else:
             p_base = None
@@ -836,9 +867,14 @@ class WMSResponse(BaseResponse):
         cyclic = hasattr(lonGrid, 'modulo')
 
         # This operation is expensive - cache results both locally and using
-        # redis
-        key = (self.path, grid.id, crs, 'project_data')
+        # redis. The cache key will depend on:
+        # 1. Which file the data are in
+        # 2. The dimension names of the data
+        # 3. The projection we want the data in
+        key = (self.path, grid.dimensions, crs, 'project_data')
         try:
+            if not self.localCache:
+                raise KeyError
             if not ('project_data' in self.localCache and
                     key in self.localCache['project_data'].keys()):
                 raise KeyError
@@ -893,8 +929,10 @@ class WMSResponse(BaseResponse):
                                           bbox, lon, lat, cyclic)
                     if self.cache:
                         self.cache.set(key, (lon, lat, dlon, do_proj))
-        if key not in self.localCache['project_data'].keys():
-            self.localCache['project_data'][key] = pickle.dumps((lon, lat, dlon, do_proj), -1)
+        if self.localCache and key not in \
+                self.localCache['project_data'].keys():
+            self.localCache['project_data'][key] = pickle.dumps((lon, lat, 
+                 dlon, do_proj), -1)
 
         if return_proj:
             if not got_proj:
