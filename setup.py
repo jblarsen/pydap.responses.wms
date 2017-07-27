@@ -7,13 +7,16 @@ install_requires=[
     # List your project dependencies here.
     # For more details, see:
     # http://packages.python.org/distribute/setuptools.html#declaring-dependencies
-    'Pydap==3.2',
+    'pydap',
     'Numpy',
     'Paste',
     'matplotlib',
     'coards',
     'iso8601',
+    'beaker',
     'Pillow',
+    'asteval',
+    'lru-dict',
 ]
 
 setup(version=version,
