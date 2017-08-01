@@ -1127,7 +1127,7 @@ class WMSResponse(BaseResponse):
  
         vertical = gridutils.get_vertical(grids[0])
         if elevation is not None:
-            vert = np.asarray(vertical[:])
+            vert = np.asarray(vertical.data[0].var[:])
             vert_bool = np.isclose(vert, elevation)
             if not vert_bool.any():
                 # Return empty image for requests with no corresponding
@@ -1359,7 +1359,7 @@ class WMSResponse(BaseResponse):
  
         vertical = gridutils.get_vertical(grid)
         if elevation is not None:
-            vert = np.asarray(vertical[:])
+            vert = np.asarray(vertical.data[0].var[:])
             vert_bool = np.isclose(vert, elevation)
             if not vert_bool.any():
                 # Return empty image for requests with no corresponding
