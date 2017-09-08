@@ -36,6 +36,7 @@ from webob.exc import HTTPBadRequest, HTTPNotModified, HTTPInternalServerError
 from paste.util.converters import asbool
 import numpy as np
 from scipy import interpolate
+from scipy.ndimage.filters import gaussian_filter as gauss_filter
 from scipy.spatial import ConvexHull
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -624,6 +625,7 @@ class WMSResponse(BaseResponse):
             # Defaults
             legend = config.get('pydap.responses.wms.cmap', 'jet')
             plot_method = 'contourf'
+            gaussian_filter = 0
 
             # FIXME: We currently only support one legend and other style params.
             # Change to dict of layer items instead
@@ -652,6 +654,8 @@ class WMSResponse(BaseResponse):
                             #legend = unicode(value, "utf-8")
                             legend = value.strip()
                             found_legend = True
+                        elif key == 'gaussian_filter':
+                            gaussian_filter = int(value)
                 if not found_legend:
                     # Use defaults
                     # FIXME: Change to use dict of layers
@@ -671,11 +675,12 @@ class WMSResponse(BaseResponse):
             return query, dpi, plot_method, vector_color, time, \
                    elevation, level, figsize, bbox, legend, crs, styles, w, \
                    h, vector_spacing, vector_offset, allow_eval, \
-                   layers
+                   gaussian_filter, layers
 
         query, dpi, plot_method, vector_color, time, elevation, \
             level, figsize, bbox, legend, crs, styles, w, h, \
-            vector_spacing, vector_offset, allow_eval, layers \
+            vector_spacing, vector_offset, allow_eval, \
+            gaussian_filter, layers \
             = prep_map(environ)
 
         #@profile
@@ -743,7 +748,8 @@ class WMSResponse(BaseResponse):
                         grids.append(grid)
                     self._plot_grid(dataset, grids, time, elevation, level, bbox_local, 
                                     (w, h), ax, crs, plot_method, 
-                                    legend, expr=expr, layers=vlayers)
+                                    legend, gaussian_filter, expr=expr,
+                                    layers=vlayers)
                 elif len(vlayers) == 1:
                     # Plot scalar field
                     names = [dataset] + hlayers
@@ -757,7 +763,8 @@ class WMSResponse(BaseResponse):
                             bbox_local = bbox[:]
                         self._plot_grid(dataset, grid, time, elevation, level,
                                         bbox_local, (w, h), ax, crs,
-                                        plot_method, legend)
+                                        plot_method, legend,
+                                        gaussian_filter)
                 elif len(vlayers) == 2:
                     # Plot vector field
                     grids = []
@@ -1341,8 +1348,8 @@ class WMSResponse(BaseResponse):
 
     #@profile
     def _plot_grid(self, dataset, grid, time, elevation, level, bbox, size, ax,
-                   crs, fill_method, cmapname='jet', expr=None,
-                   layers=None):
+                   crs, fill_method, cmapname='jet', gaussian_filter=0,
+                   expr=None, layers=None):
         if expr is not None:
             aeval = RestrictedInterpreter()
             grids = grid
@@ -1431,6 +1438,8 @@ class WMSResponse(BaseResponse):
                 # plot
                 #if data.shape and data.any():
                 if data.shape and np.ma.count(data) > 0:
+                    if gaussian_filter > 0:
+                        data = gauss_filter(data, gaussian_filter)
                     plot_method = getattr(ax, fill_method)
                     if cmapname in self.colors:
                         norm = self.colors[cmapname]['norm']
