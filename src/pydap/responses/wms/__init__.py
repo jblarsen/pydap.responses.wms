@@ -67,6 +67,7 @@ except:
 
 # Local imports
 from .arrowbarbs import arrow_barbs
+from .quiver_pydap import quiver
 from . import projutils
 from . import gridutils
 from . import plotutils
@@ -660,9 +661,11 @@ class WMSResponse(BaseResponse):
                     # Use defaults
                     # FIXME: Change to use dict of layers
                     attrs = grid.attributes
-                    if 'standard_name' in attrs and \
-                        attrs['standard_name'] in self.styles:
-                        legend = self.styles[attrs['standard_name']][0]['legend']
+                    if 'standard_name' in attrs:
+                        norm_standard_name = attrs['standard_name'].replace( \
+                            'northward_', '').replace('eastward_', '')
+                        if norm_standard_name in self.styles:
+                            legend = self.styles[norm_standard_name][0]['legend']
 
             # Check whether legend is valid by getting it
             self._get_cmap(legend)
@@ -1305,28 +1308,28 @@ class WMSResponse(BaseResponse):
                                     edgecolor='w', antialiased=True, fill_empty=True,
                                     sizes=sizes, barb_increments=barb_incs)
                     elif vector_method == 'color_quiver1':
-                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=3.0, scale_units='inches',
                         width=0.11, linewidths=0.5, headwidth=2,
                         headlength=2, headaxislength=2,
                         edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver2':
-                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.0825, linewidths=0.5, headwidth=2,
                         headlength=1, headaxislength=1,
                         edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver3':
-                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.05, linewidths=0.5, headwidth=3,
                         headlength=1.5, headaxislength=1.5,
                         edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver4':
-                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.1875, linewidths=0.5, headwidth=1,
                         headlength=0.5, headaxislength=0.5,
@@ -1334,10 +1337,11 @@ class WMSResponse(BaseResponse):
                         norm=norm, cmap=cmap)
                     else:
                         #if vector_method == 'black_quiver':
-                        ax.quiver(X, Y, data[0]*di, data[1]*di, pivot='middle',
+                        quiver(ax, X, Y, data[0]*di, data[1]*di, pivot='middle',
                                   units='inches', scale=4.0, scale_units='inches',
                                   width=0.04, color=vector_color, linewidths=1,
                                   headlength=4, headaxislength=3.5,
+                                  dotsize=1.0,
                                   edgecolors=('w'), antialiased=True)
                         
             lon = lon_save
