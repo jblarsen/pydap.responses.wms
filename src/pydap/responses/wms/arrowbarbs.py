@@ -7,7 +7,8 @@ from __future__ import (absolute_import, division, print_function,
 
 import numpy as np
 from numpy import ma
-from matplotlib.quiver import Barbs
+#from matplotlib.quiver import Barbs
+from .quiver_pydap import Barbs
 import matplotlib.transforms as transforms
 from matplotlib.patches import CirclePolygon
 
