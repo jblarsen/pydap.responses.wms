@@ -168,8 +168,8 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
         <northBoundLatitude>${maxy}</northBoundLatitude>
       </EX_GeographicBoundingBox>
       <BoundingBox CRS="${default_crs}" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
-      <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat()}" nearestValue="0">
-        ${','.join([t.isoformat() for t in time])}
+      <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat() + 'Z'}" nearestValue="0">
+        ${','.join([t.isoformat() + 'Z' for t in time])}
       </Dimension>
       <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z.data[:])[0]}" multipleValues="0" nearestValue="0">
         ${','.join([str(zz) for zz in np.asarray(z.data[:])])}

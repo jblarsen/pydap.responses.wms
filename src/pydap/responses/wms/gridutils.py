@@ -225,7 +225,7 @@ def time_slice(time, grid, dataset):
     else:
         l = np.zeros(values.shape, bool)  # get no data by default
         if time is None:
-            time = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+            time = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
         tokens = time.split(',')
         for token in tokens:
             if '/' in token: # range
