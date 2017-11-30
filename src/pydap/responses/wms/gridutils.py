@@ -196,19 +196,18 @@ def find_containing_bounds(axis, v0, v1):
     if not ascending: i0, i1 = len(axis)-i1, len(axis)-i0
     return max(0, i0), min(len(axis), i1)
 
-def time_slice(time, grid, dataset):
+def time_slice(time, grid, dataset, nearestValue=True):
     """\
     Slice according to time request (WMS-T). Since it is very expensive to
     convert the entire grid time array to datetime objects we do the opposite
     and convert the requested time steps to the unit used in the grid time
     array.
 
-    If input time is None the nearest timestep is returned.
+    If nearestValue is True then the nearest timestep is returned. If input
+    time is None the nearest timestep to now is always returned.
     """
     if time is None:
-        find_nearest = True
-    else:
-        find_nearest = False
+        nearestValue = True
 
     values = None
     for dim in grid.maps.values():
@@ -242,7 +241,7 @@ def time_slice(time, grid, dataset):
                 epoch = values[0]
                 values = values - epoch
                 instant = instant - epoch
-                if not find_nearest:
+                if not nearestValue:
                     # Require almost exact match
                     l = np.isclose(values, instant)
                     # Convert array to index
