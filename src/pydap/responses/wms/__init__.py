@@ -1,69 +1,56 @@
-from __future__ import division
+"""
+Web Map Service 1.3.0 response for Pydap.
+"""
 
-try:
-    from cStringIO import StringIO as BytesIO
-except ImportError:
-    from io import BytesIO
-
-try:
-    from functools import reduce
-except ImportError:
-    pass
-import re
-import operator
+# Standard library imports
+import calendar
+from datetime import datetime
+from email.utils import parsedate
+from functools import reduce
+from io import BytesIO
 import json
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
+import operator
+import pickle
+import re
 import sys
 import time
-import calendar
-from email.utils import parsedate
-from datetime import datetime
+from urllib.parse import urlparse, unquote
+
+# External imports
 try:
-    from urlparse import urlparse
-except ImportError:
-    from urllib.parse import urlparse
-try:
-    from urllib.parse import unquote
-except ImportError:
-    from urllib import unquote
+    from asteval_restricted import RestrictedInterpreter
+except:
+    RestrictedInterpreter = None
+from dogpile.cache import make_region
+from dogpile.cache.api import NO_VALUE
+from lru import LRU
+from matplotlib import rcParams
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.cm import get_cmap
+from matplotlib.colors import Normalize
+from matplotlib.colors import from_levels_and_colors
+from matplotlib.figure import Figure
+from matplotlib.patheffects import withStroke
+import matplotlib.patheffects as PathEffects
+from matplotlib.pyplot import setp
+from matplotlib.ticker import FormatStrFormatter
+import numpy as np
 from paste.request import construct_url, parse_dict_querystring
+from paste.util.converters import asbool
+import pyproj
 from webob import Response
 from webob.dec import wsgify
 from webob.exc import HTTPBadRequest, HTTPNotModified, HTTPInternalServerError
-from paste.util.converters import asbool
-import numpy as np
 from scipy import interpolate
 from scipy.ndimage.filters import gaussian_filter as gauss_filter
 from scipy.spatial import ConvexHull
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from matplotlib.figure import Figure
-from matplotlib.cm import get_cmap
-from matplotlib.colors import Normalize
-from matplotlib import rcParams
-from matplotlib.colors import from_levels_and_colors
-from matplotlib.ticker import FormatStrFormatter
-from matplotlib.pyplot import setp
-from matplotlib.patheffects import withStroke
-import matplotlib.patheffects as PathEffects
 
-rcParams['xtick.labelsize'] = 'small'
-rcParams['ytick.labelsize'] = 'small'
-rcParams['contour.negative_linestyle'] = 'solid'
-import pyproj
-from lru import LRU
-
+# Import Pydap libraries
 from pydap.model import *
 from pydap.exceptions import ServerError
 from pydap.responses.lib import BaseResponse
 from pydap.util.template import GenshiRenderer, StringLoader, TemplateNotFound
 from pydap.lib import walk
-try:
-    from asteval_restricted import RestrictedInterpreter
-except:
-    RestrictedInterpreter = None
 
 # Local imports
 from .arrowbarbs import arrow_barbs
@@ -73,10 +60,12 @@ from . import gridutils
 from . import plotutils
 from . import validation
 
-# Setup caching
-from dogpile.cache import make_region
-from dogpile.cache.api import NO_VALUE
+# Setup matplotlib defaults
+rcParams['xtick.labelsize'] = 'small'
+rcParams['ytick.labelsize'] = 'small'
+rcParams['contour.negative_linestyle'] = 'solid'
 
+# Constants
 WMS_ARGUMENTS = ['request', 'bbox', 'cmap', 'layers', 'width', 'height', 
                  'transparent', 'time', 'level', 'elevation', 'styles',
                  'service', 'version', 'format', 'crs', 'bounds',
