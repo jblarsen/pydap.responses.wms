@@ -1,28 +1,30 @@
-from __future__ import division
-import ctypes
-try:
-    from cStringIO import StringIO as BytesIO
-except ImportError:
-    from io import BytesIO
+"""
+Plotting utilities for the pydap WMS response.
+"""
 
-import numpy as np
-import netCDF4
+# Standard library imports
+from io import BytesIO
+
+# External imports
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.colorbar import ColorbarBase
-from matplotlib.colors import Normalize
-from matplotlib.colors import BoundaryNorm
 from matplotlib import rcParams
 from matplotlib.ticker import NullLocator
+from PIL import Image
 
+
+# Matplotlib defaults
 rcParams['xtick.labelsize'] = 'small'
 rcParams['ytick.labelsize'] = 'small'
 #rcParams['text.antialiased'] = False
 
-from PIL import Image
 
-def make_colorbar(width, height, dpi, grid, orientation, transparent, norm, 
-                  cmap, extend, paletted, add_ticks, center_labels):
+def make_colorbar(width, height, dpi, orientation, transparent, norm,
+                  cmap, extend, add_ticks, center_labels):
+    """\
+    Return colorbar saved to BytesIO object.
+    """
     dpi = 2*dpi
     figsize = width/dpi, height/dpi
     fig = Figure(figsize=figsize, dpi=dpi, frameon=False)
@@ -39,7 +41,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
         if add_ticks:
             cbwidth = 0.95 # ratio of width to figsize
             cbratio = 0.10 # ratio of width to height
-            cbheight= cbratio*cbwidth*width/float(height)
+            cbheight = cbratio*cbwidth*width/float(height)
             ax = fig.add_axes([(1-cbwidth)/2.0, 1-cbheight, cbwidth, cbheight])
         else:
             ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
@@ -56,9 +58,10 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
             nb_pos = nb
     else:
         nb_pos = None
-      
+
     cb = ColorbarBase(ax, cmap=cmap, norm=norm, ticks=nb_pos, drawedges=True,
-            orientation=orientation, extend=extend, extendfrac='auto')
+                      orientation=orientation, extend=extend,
+                      extendfrac='auto')
 
     if center_labels:
         cb.ax.set_xticklabels(nb)
@@ -93,7 +96,7 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
                 newticks.append(newtick)
             cb.ax.set_xticklabels(newticks)
             fontsize = width/(2*(stxt+5.0))
-            fontsize = max(min(12, fontsize),6)
+            fontsize = max(min(12, fontsize), 6)
             for tick in cb.ax.get_xticklabels():
                 tick.set_fontsize(fontsize)
                 tick.set_color('black')
@@ -102,41 +105,23 @@ def make_colorbar(width, height, dpi, grid, orientation, transparent, norm,
 
     # Save to buffer.
     canvas = FigureCanvas(fig)
-    output = BytesIO() 
+    output = BytesIO()
     canvas.print_png(output)
-    """
-    if paletted:
-        # The text on colorbars look bad when we disable antialiasing
-        # entirely. We therefore just force the number of paletted
-        # colors to a reasonable number
-        try:
-            # We reduce the number of colors to the number of colors
-            # in the color scale plus 20 to allow for some
-            # text antialiasing.
-            nother = 20 
-            ncolors = len(norm.boundaries) + nother
-        except AttributeError:
-            ncolors = None
-        output = convert_paletted(canvas, ncolors=ncolors)
-    else:
-        output = BytesIO() 
-        canvas.print_png(output)
-    """
     return output
 
 #@profile
 def convert_paletted(canvas, ncolors=None, verbose=False):
     """\
     Convert matplotlib canvas to paletted PNG if there are less
-    than 256 colors (if ncolors is not None paletting is always 
+    than 256 colors (if ncolors is not None paletting is always
     employed. Pixels are considered transparent if the
-    alpha channel value is <= 128 and opaque otherwise. 
+    alpha channel value is <= 128 and opaque otherwise.
 
     Returns a memory file (BytesIO object) containing the PNG
     image.
     """
-    outbuffer = BytesIO() 
-   
+    outbuffer = BytesIO()
+
     # Read image
     buf, size = canvas.print_to_buffer()
     im = Image.frombuffer('RGBA', size, buf, 'raw', 'RGBA', 0, 1)
@@ -157,7 +142,7 @@ def convert_paletted(canvas, ncolors=None, verbose=False):
         #im = im.convert("P", palette=Image.ADAPTIVE, colors=ncolors)
         im = im.quantize(colors=ncolors, method=2, kmeans=0, palette=None)
         # Set all pixel values below ncolors to 1 and the rest to 0
-        mask = Image.eval(alpha, lambda a: 255 if a <=128 else 0)
+        mask = Image.eval(alpha, lambda a: 255 if a <= 128 else 0)
         # Paste the color of index ncolors and use alpha as a mask
         im.paste(ncolors, mask)
         # Truncate palette to actual size to save space
@@ -181,7 +166,7 @@ def modify_contour_levels(levels, extend):
 
 def mslext2text(ncchars):
     """\
-    Convert text of H and L's (high and low pressures) to TeXlike plot 
+    Convert text of H and L's (high and low pressures) to TeXlike plot
     format
     """
     colors = {'H': 'blue', 'L': 'red'}
