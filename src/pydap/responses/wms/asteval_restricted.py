@@ -1,6 +1,23 @@
 """
-Module containing a more restricted asteval.Interpreter class
+Module containing a more restricted asteval.Interpreter class. See
+
+https://github.com/newville/asteval
+
+for a description os asteval and
+
+https://docs.python.org/3/library/ast.html
+
+for a description of the Python Abstract Syntax Tree (AST).
+
+Currently we support the following AST nodes:
+
+'binop', 'call', 'expr', 'module', 'name' and 'num'
+
+Furthermore we support the following symbols from NumPy:
+
+'fmax', 'fmin' and 'sign'
 """
+
 # Standard library imports
 from __future__ import division, print_function
 from sys import stdout
