@@ -1,46 +1,33 @@
 """
-Module for validating and converting query string input to the WMS service.
+Module for validating and converting query string input to the WMS 1.3.0
+service.
 """
 
-from __future__ import division
-
-try:
-    from cStringIO import StringIO as BytesIO
-except ImportError:
-    from io import BytesIO
-
-try:
-    from functools import reduce
-except ImportError:
-    pass
-import re
-import operator
-import json
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
-import time
+# Standard library imports
 import calendar
+from datetime import datetime,
 from email.utils import parsedate
-from datetime import datetime
-try:
-    from urlparse import urlparse
-except ImportError:
-    from urllib.parse import urlparse
-try:
-    from urllib.parse import unquote
-except ImportError:
-    from urllib import unquote
+import json
+from functools import reduce
+from io import BytesIO
+import operator
+import pickle
+import re
+import time
+from urllib.parse import urlparse, unquote
+
+# External imports
 import numpy as np
 from paste.request import construct_url, parse_dict_querystring
-from webob.exc import HTTPBadRequest, HTTPNotModified
 from paste.util.converters import asbool
 import pyproj
+from webob.exc import HTTPBadRequest, HTTPNotModified
 
+# Pydap imports
 from pydap.model import *
 from pydap.lib import walk
 
+# Internal imports
 from . import projutils
 from . import gridutils
 
