@@ -2,8 +2,7 @@
 Module containing projection related utilities.
 """
 
-from __future__ import division
-
+# External imports
 import numpy as np
 import pyproj
 
@@ -106,10 +105,10 @@ def rotate_vector(p_source,p_target,uin,vin,lons,lats,returnxy=False):
     else:
         return uout,vout
 
-def project_data(p_source, p_target, bbox, lon, lat, cyclic):
+def project_data(p_source, p_target, bbox, lon, lat):
     """\
-    Project data and determine increment for going around globe. Input is
-    assumed to be in EPSG:4326.
+    Project data and determine increment in target projection for going around
+    globe. Input is assumed to be in EPSG:4326.
 
     Arguments:
     p_source -- Source pyproj.Proj instance
@@ -117,7 +116,6 @@ def project_data(p_source, p_target, bbox, lon, lat, cyclic):
     bbox -- input bounding box - used for normalizing output
     lon -- input longitude coordinates
     lat -- input latitude coordinates
-    cyclic -- boolean true if global input coordinates
 
     Returns:
     x -- projection x coordinates
@@ -137,8 +135,11 @@ def project_data(p_source, p_target, bbox, lon, lat, cyclic):
         dx = 2.0*pyproj.transform(p_source, p_target, 180.0, 0.0)[0]
         x, y = pyproj.transform(p_source, p_target, lon, lat)
         # Special handling when request crosses discontinuity
-        if bbox[0] > bbox[2]:
-        #if bbox[0] > bbox[2] or cyclic:
+        # and for cyclic fields (a field is assumed cyclic if it has
+        # an extra cyclic longitude row so that the projected coordinates are
+        # identical).
+        cyclic = np.allclose(x[0,:], x[-1,:])
+        if bbox[0] > bbox[2] or cyclic:
             x = np.where(x >= 0.0, x, x+dx)
         x = x.astype(lon.dtype)
         y = y.astype(lat.dtype)
@@ -147,9 +148,4 @@ def project_data(p_source, p_target, bbox, lon, lat, cyclic):
         dx = 360.0
     while np.min(x) > bbox[0]:
         x -= dx
-    # Projections can result in inf values - mask them out
-    #x = np.ma.masked_invalid(x)
-    #y = np.ma.masked_invalid(y)
-    # The above is really not a good idea since we should not present data in
-    # projections that go towards infinity where they have data
     return x, y, dx, do_proj
