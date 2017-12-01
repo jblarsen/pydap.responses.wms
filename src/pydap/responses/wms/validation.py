@@ -5,7 +5,7 @@ service.
 
 # Standard library imports
 import calendar
-from datetime import datetime,
+from datetime import datetime
 from email.utils import parsedate
 import json
 from functools import reduce
