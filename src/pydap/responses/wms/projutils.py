@@ -141,6 +141,10 @@ def project_data(p_source, p_target, bbox, lon, lat):
         cyclic = np.allclose(x[0,:], x[-1,:])
         if bbox[0] > bbox[2] or cyclic:
             x = np.where(x >= 0.0, x, x+dx)
+            if cyclic:
+                # The wrap-around longitude will normally be 0. We want it
+                # to be 0 + dx.
+                x[:,-1] = x[:,-1] + dx
         x = x.astype(lon.dtype)
         y = y.astype(lat.dtype)
     else:
