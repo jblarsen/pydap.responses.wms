@@ -138,7 +138,7 @@ def project_data(p_source, p_target, bbox, lon, lat):
         # and for cyclic fields (a field is assumed cyclic if it has
         # an extra cyclic longitude row so that the projected coordinates are
         # identical).
-        cyclic = np.allclose(x[0,:], x[-1,:])
+        cyclic = np.allclose(x[:,0], x[:,-1])
         if bbox[0] > bbox[2] or cyclic:
             x = np.where(x >= 0.0, x, x+dx)
             if cyclic:
