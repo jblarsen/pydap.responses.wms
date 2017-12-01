@@ -168,7 +168,7 @@ DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
         <northBoundLatitude>${maxy}</northBoundLatitude>
       </EX_GeographicBoundingBox>
       <BoundingBox CRS="${default_crs}" minx="${minx}" miny="${miny}" maxx="${maxx}" maxy="${maxy}"/>
-      <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat() + 'Z'}" nearestValue="0">
+      <Dimension py:if="time is not None" name="time" units="ISO8601" default="${time[idx_nearest].isoformat() + 'Z'}" nearestValue="1">
         ${','.join([t.isoformat() + 'Z' for t in time])}
       </Dimension>
       <Dimension py:if="z is not None" name="elevation" units="${z.attributes.get('units', '')}" default="${np.asarray(z.data[:])[0]}" multipleValues="0" nearestValue="0">
@@ -478,8 +478,8 @@ class WMSResponse(BaseResponse):
 
             norm, cmap, extend = self._get_colors(cmapname, grid)
 
-            output = plotutils.make_colorbar(w, h, dpi, grid, orientation, 
-                     transparent, norm, cmap, extend, paletted, add_ticks,
+            output = plotutils.make_colorbar(w, h, dpi, orientation,
+                     transparent, norm, cmap, extend, add_ticks,
                      center_labels)
 
             if hasattr(dataset, 'close'): dataset.close()
@@ -936,7 +936,7 @@ class WMSResponse(BaseResponse):
                         dlon = dataset[xname].attributes['modulo']
                     else:
                         lon, lat, dlon, do_proj = projutils.project_data(p_base, p_query,
-                                          bbox, lon, lat, cyclic)
+                                          bbox, lon, lat)
                     if self.cache:
                         self.cache.set(key, (lon, lat, dlon, do_proj))
         if self.localCache and key not in \
