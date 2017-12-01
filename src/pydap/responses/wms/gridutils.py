@@ -1,29 +1,32 @@
-from __future__ import division
+"""
+Utilities for extracting information about a grid in Pydap.
+"""
 
+# Standard library imports
 import datetime
 import re
-import operator
 
+# External imports
 import iso8601
-import numpy as np
 import netCDF4
+import numpy as np
 
+# Pydap imports
 from pydap.model import GridType
 from pydap.lib import walk
 
 def is_valid(grid, dataset):
-    return (get_lon(grid, dataset) is not None and 
+    """Returns True if this is a valid grid and False otherwise."""
+    return (get_lon(grid, dataset) is not None and
             get_lat(grid, dataset) is not None)
 
 def get_lon(grid, dataset):
+    """Returns longitude array of a grid."""
     def check_attrs(var):
+        """Checks for C/F longitude attributes and returns data if found."""
         if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
-            var.attributes.get('standard_name', '') == 'longitude'):
+                var.attributes.get('standard_name', '') == 'longitude'):
             return np.asarray(var.data[:])
-        #if (re.match('degrees?_e', var.attributes.get('units', ''), re.IGNORECASE) or
-        #    var.attributes.get('axis', '').lower() == 'x' or
-        #    var.attributes.get('standard_name', '') == 'longitude'):
-        #    return var
 
     # check maps first
     for dim in grid.maps.values():
@@ -40,13 +43,11 @@ def get_lon(grid, dataset):
     return None
 
 def get_lat(grid, dataset):
+    """Returns latitude array of a grid."""
     def check_attrs(var):
-        #if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
-        #    var.attributes.get('axis', '').lower() == 'y' or
-        #    var.attributes.get('standard_name', '') == 'latitude'):
-        #    return var
+        """Checks for C/F latitude attributes and returns data if found."""
         if (re.match('degrees?_n', var.attributes.get('units', ''), re.IGNORECASE) or
-            var.attributes.get('standard_name', '') == 'latitude'):
+                var.attributes.get('standard_name', '') == 'latitude'):
             return np.asarray(var.data[:])
 
     # check maps first
@@ -64,6 +65,7 @@ def get_lat(grid, dataset):
     return None
 
 def get_time(grid):
+    """Returns timesteps of a grid."""
     for dim in grid.maps.values():
         if ' since ' in dim.attributes.get('units', ''):
             calendar = dim.attributes.get('calendar', 'standard')
@@ -79,6 +81,7 @@ def get_time(grid):
     return None
 
 def get_vertical(grid):
+    """Returns vertical dimension variable of a grid."""
     for dim in grid.maps.values():
         if isvertical(dim):
             return dim
@@ -101,6 +104,7 @@ def isvertical(dim):
 
 #@profile
 def fix_data(data, attrs):
+    """Perform masking, unpacking and averaging of data."""
     if len(data.shape) > 2 and data.shape[0] == 1:
         data = np.asarray(data)[0]
     if 'missing_value' in attrs:
@@ -125,6 +129,7 @@ def fix_data(data, attrs):
     return data
 
 def fix_map_attributes(dataset):
+    """Fix map attributes."""
     for grid in walk(dataset, GridType):
         for map_ in grid.maps.values():
             if not map_.attributes and map_.name in dataset:
@@ -237,7 +242,6 @@ def time_slice(time, grid, dataset, nearestValue=True):
             else:
                 instant = iso8601.parse_date(token.strip().rstrip('Z'), default_timezone=None)
                 instant = netCDF4.date2num(instant, dim.units, calendar=calendar)
-                # TODO: Calculate index directly
                 epoch = values[0]
                 values = values - epoch
                 instant = instant - epoch
