@@ -150,6 +150,4 @@ def project_data(p_source, p_target, bbox, lon, lat):
     else:
         x, y = lon, lat
         dx = 360.0
-    while np.min(x) > bbox[0]:
-        x -= dx
     return x, y, dx, do_proj

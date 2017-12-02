@@ -933,6 +933,10 @@ class WMSResponse(BaseResponse):
             self.localCache['project_data'][key] = pickle.dumps((lon, lat, 
                  dlon, do_proj), -1)
 
+        # Rewind data if needed
+        while np.min(lon) > bbox[0]:
+            lon -= dlon
+
         if return_proj:
             if not got_proj:
                 do_proj, p_base, p_query = self._get_proj(crs)
@@ -1377,9 +1381,9 @@ class WMSResponse(BaseResponse):
                                      return_proj=False)
 
         # Now we plot the data window until the end of the bbox:
-        while np.min(lon) < bbox[2]:
-            lon_save = lon[:]
-            lat_save = lat[:]
+        while np.min(lon) <= bbox[2]:
+            lon_save = np.array(lon, copy=True)
+            lat_save = np.array(lat, copy=True)
 
             try:
                 (j0, j1, jstep), (i0, i1, istep) = \
