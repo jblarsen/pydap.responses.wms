@@ -54,7 +54,6 @@ from pydap.lib import walk
 
 # Local imports
 from .arrowbarbs import arrow_barbs
-from .quiver_pydap import quiver
 from . import projutils
 from . import gridutils
 from . import plotutils
@@ -1297,32 +1296,32 @@ class WMSResponse(BaseResponse):
                                  'headaxislength': 1.25,
                                  'emptybarb': 0.2}
                         arrow_barbs(ax, X, Y, data[0], data[1], pivot='middle', 
-                                    length=5.5, linewidth=1, color=vector_color,
+                                    length=5.5, color=vector_color,
                                     edgecolor='w', antialiased=True, fill_empty=True,
                                     sizes=sizes, barb_increments=barb_incs)
                     elif vector_method == 'color_quiver1':
-                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=3.0, scale_units='inches',
                         width=0.11, linewidths=0.5, headwidth=2,
                         headlength=2, headaxislength=2,
                         edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver2':
-                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.0825, linewidths=0.5, headwidth=2,
                         headlength=1, headaxislength=1,
                         edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver3':
-                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.05, linewidths=0.5, headwidth=3,
                         headlength=1.5, headaxislength=1.5,
                         edgecolors=('k'), antialiased=False,
                         norm=norm, cmap=cmap)
                     elif vector_method == 'color_quiver4':
-                        quiver(ax, X, Y, data[0]*di, data[1]*di, d, pivot='middle',
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, d, pivot='middle',
                         units='inches', scale=4.0, scale_units='inches',
                         width=0.1875, linewidths=0.5, headwidth=1,
                         headlength=0.5, headaxislength=0.5,
@@ -1330,12 +1329,11 @@ class WMSResponse(BaseResponse):
                         norm=norm, cmap=cmap)
                     else:
                         #if vector_method == 'black_quiver':
-                        quiver(ax, X, Y, data[0]*di, data[1]*di, pivot='middle',
-                                  units='inches', scale=4.0, scale_units='inches',
-                                  width=0.04, color=vector_color, linewidths=1,
-                                  headlength=4, headaxislength=3.5,
-                                  dotsize=1.0,
-                                  edgecolors=('w'), antialiased=True)
+                        ax.quiver(X, Y, data[0]*di, data[1]*di, pivot='middle',
+                        units='inches', scale=4.0, scale_units='inches',
+                        width=0.04, color=vector_color, linewidths=1,
+                        headlength=4, headaxislength=3.5, minlength=2,
+                        edgecolors=('w'), antialiased=True)
                         
             lon = lon_save
             lat = lat_save
@@ -1629,7 +1627,7 @@ class WMSResponse(BaseResponse):
             # Decide how long an expiration time we will use. We default to
             # one day (86400 seconds)
             expiretime = 86400
-            global_attrs = dataset.attributes['NC_GLOBAL']
+            global_attrs = dataset.attributes.get('NC_GLOBAL', {})
             # Reduce expiration time when requesting epoch, last_modified
             # or time since these values are updated when new forecasts
             # are produced
