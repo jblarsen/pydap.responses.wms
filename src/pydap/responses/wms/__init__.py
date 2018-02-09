@@ -526,11 +526,11 @@ class WMSResponse(BaseResponse):
         """Tries to get local colormap first and then a mpl colormap."""
         try:
             cmap = self.colors[name]
-        except KeyError:
+        except KeyError as e1:
             try:
                 cmap = get_cmap(name)
-            except ValueError as e:
-                raise HTTPBadRequest('Colormap Error: %s' % e.message)
+            except ValueError as e2:
+                raise HTTPBadRequest('Colormap %s not found' % name)
         return cmap
 
     #@profile
