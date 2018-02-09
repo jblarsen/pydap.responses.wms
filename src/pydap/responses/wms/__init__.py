@@ -405,7 +405,7 @@ class WMSResponse(BaseResponse):
         self._get_cmap(cmapname)
 
         # Scale DPI according to size
-        size = int(query.get('size', 0))
+        size = int(query.get('size', 600))
         if size < 25 or size > min(MAX_WIDTH, MAX_HEIGHT):
             msg = 'Image size must be in range [25; %d]' \
                   % min(MAX_WIDTH, MAX_HEIGHT)
