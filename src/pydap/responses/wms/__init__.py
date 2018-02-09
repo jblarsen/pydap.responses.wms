@@ -1723,7 +1723,8 @@ class WMSResponse(BaseResponse):
                 levels = gridutils.get_vertical(dataset[layer])
                 if levels is not None and 'levels' in items:
                     output[layer]['levels'] = {}
-                    output[layer]['levels']['values'] = np.asarray(levels[:]).tolist()
+                    output[layer]['levels']['values'] = np.asarray(
+                            np.asarray(levels.data[0])).tolist()
                     if 'units' in levels.attributes:
                         output[layer]['levels']['units'] = levels.attributes['units']
                     if 'long_name' in levels.attributes:
