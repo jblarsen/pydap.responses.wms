@@ -876,7 +876,7 @@ class WMSResponse(BaseResponse):
             if not ('project_data' in self.localCache and
                     key in self.localCache['project_data'].keys()):
                 raise KeyError
-            lon, lat, dlon, do_proj = pickle.loads(self.localCache['project_data'][key])
+            lon, lat, dlon, do_proj = self.localCache['project_data'][key]
             # Check that the dimensions match - otherwise discard
             # cached value and recalculate
             # TODO: Check first and last values as well
@@ -907,8 +907,8 @@ class WMSResponse(BaseResponse):
                     raise KeyError
             except KeyError:
                 # Project data
-                lon = np.asarray(lonGrid[:])
-                lat = np.asarray(latGrid[:])
+                lon = np.asarray(lonGrid[:], dtype=lonGrid.dtype)
+                lat = np.asarray(latGrid[:], dtype=latGrid.dtype)
                 got_proj = True
                 do_proj, p_base, p_query = self._get_proj(crs)
                 if not do_proj:
@@ -929,12 +929,13 @@ class WMSResponse(BaseResponse):
                         self.cache.set(key, (lon, lat, dlon, do_proj))
         if self.localCache and key not in \
                 self.localCache['project_data'].keys():
-            self.localCache['project_data'][key] = pickle.dumps((lon, lat, 
-                 dlon, do_proj), -1)
+            lon.flags.writeable = False
+            lat.flags.writeable = False
+            self.localCache['project_data'][key] = lon, lat, dlon, do_proj
 
         # Rewind data if needed
         while np.min(lon) > bbox[0]:
-            lon -= dlon
+            lon = lon[:] - dlon
 
         if return_proj:
             if not got_proj:
@@ -1159,9 +1160,13 @@ class WMSResponse(BaseResponse):
 
         # Now we plot the data window until the end of the bbox:
         cnt_window = 0
-        while np.min(lon) < bbox[2]:
-            lon_save = lon[:]
-            lat_save = lat[:]
+        lon_save = lon
+        first = True
+        lon_min = np.min(lon)
+        while lon_min <= bbox[2]:
+            if not first:
+                lon = lon_save
+                lon = lon[:] + dlon
 
             # We do not really need the slicing information but we want to
             # see if an OutsideGridException is thrown
@@ -1169,6 +1174,7 @@ class WMSResponse(BaseResponse):
                 (j0, j1, jstep), (i0, i1, istep) = \
                 self._find_slices(lon, lat, dlon, bbox, cyclic, size)
             except OutsideGridException:
+                lon_save = lon[:]
                 lon += dlon
                 cnt_window += 1
                 continue
@@ -1335,9 +1341,8 @@ class WMSResponse(BaseResponse):
                         headlength=4, headaxislength=3.5, minlength=2,
                         edgecolors=('w'), antialiased=True)
                         
-            lon = lon_save
-            lat = lat_save
-            lon += dlon
+            lon_min += dlon
+            first = False
             cnt_window += 1
 
 
@@ -1379,14 +1384,19 @@ class WMSResponse(BaseResponse):
                                      return_proj=False)
 
         # Now we plot the data window until the end of the bbox:
-        while np.min(lon) <= bbox[2]:
-            lon_save = np.array(lon, copy=True)
-            lat_save = np.array(lat, copy=True)
+        lon_save = lon
+        first = True
+        lon_min = np.min(lon)
+        while lon_min <= bbox[2]:
+            if not first:
+                lon = lon_save
+                lon = lon[:] + dlon
 
             try:
                 (j0, j1, jstep), (i0, i1, istep) = \
                 self._find_slices(lon, lat, dlon, bbox, cyclic, size)
             except OutsideGridException:
+                lon_save = lon[:]
                 lon += dlon
                 continue
             
@@ -1401,6 +1411,7 @@ class WMSResponse(BaseResponse):
 
             # Plot data.
             if data.shape: 
+
                 # FIXME: Is this section really necessary - see vector method
                 # apply time slices
                 if l is not None:
@@ -1472,9 +1483,8 @@ class WMSResponse(BaseResponse):
                         setp(clbls, path_effects=[withStroke(linewidth=2, foreground="white")])
                     else:
                         plot_method(X, Y, data, norm=norm, cmap=cmap, antialiased=False)
-            lon = lon_save
-            lat = lat_save
-            lon += dlon
+            lon_min += dlon
+            first = False
 
         # Check if we should plot annotations on the map
         if 'annotations' in grid.attributes:
