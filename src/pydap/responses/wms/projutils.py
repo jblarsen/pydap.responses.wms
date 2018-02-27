@@ -131,7 +131,7 @@ def project_data(p_source, p_target, bbox, lon, lat):
     do_proj = p_source != p_target
     if do_proj:
         if len(lon.shape) == 1:
-            lon, lat = np.meshgrid(lon, lat)
+            lon, lat = np.meshgrid(lon, lat, copy=False)
         dx = 2.0*pyproj.transform(p_source, p_target, 180.0, 0.0)[0]
         x, y = pyproj.transform(p_source, p_target, lon, lat)
         # Special handling when request crosses discontinuity
