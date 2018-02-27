@@ -1638,6 +1638,10 @@ class WMSResponse(BaseResponse):
             # one day (86400 seconds)
             expiretime = 86400
             global_attrs = dataset.attributes.get('NC_GLOBAL', {})
+
+            # Extract timestamp from dataset attributes
+            last_modified = dataset.attributes.get('Last-modified', None)
+
             # Reduce expiration time when requesting epoch, last_modified
             # or time since these values are updated when new forecasts
             # are produced
