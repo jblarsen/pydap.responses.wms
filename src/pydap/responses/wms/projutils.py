@@ -134,11 +134,23 @@ def project_data(p_source, p_target, bbox, lon, lat):
             lon, lat = np.meshgrid(lon, lat, copy=False)
         dx = 2.0*pyproj.transform(p_source, p_target, 180.0, 0.0)[0]
         x, y = pyproj.transform(p_source, p_target, lon, lat)
+
         # Special handling when request crosses discontinuity
         # and for cyclic fields (a field is assumed cyclic if it has
         # an extra cyclic longitude row so that the projected coordinates are
         # identical).
-        cyclic = np.allclose(x[:,0], x[:,-1])
+
+        # Check when the cyclic point is not at the coordinate discontinuity
+        del_x = np.amin(np.abs(x[:,-1] - x[:,0]))
+        dgrid = dx/(x.shape[1]-1)
+        cyclic = del_x < 0.5*dgrid
+
+        # Check when the cyclic point is at the coordinate discontinuity
+        if not cyclic:
+            del_x = np.amin(np.abs(x[:,-1] - x[:,0] - dx))
+            dgrid = dx/(x.shape[1]-1)
+            cyclic = del_x < 0.5*dgrid
+            
         if bbox[0] > bbox[2] or cyclic:
             x = np.where(x >= 0.0, x, x+dx)
             if cyclic:
@@ -148,6 +160,7 @@ def project_data(p_source, p_target, bbox, lon, lat):
         x = x.astype(lon.dtype)
         y = y.astype(lat.dtype)
     else:
+        # FIXME: This path has not been checked
         x, y = lon, lat
         dx = 360.0
     return x, y, dx, do_proj
