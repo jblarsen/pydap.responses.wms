@@ -75,7 +75,8 @@ MIN_HEIGHT=0
 MAX_HEIGHT=8192
 DEFAULT_CRS = 'EPSG:4326'
 WMS_VERSION = '1.3.0'
-SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857'] #, 'EPSG:3413', 'EPSG:3031']
+SUPPORTED_CRS = ['EPSG:4326', 'EPSG:3857', 'EPSG:3413', 'EPSG:3031',
+                 'EPSG:3995']
 
 DEFAULT_TEMPLATE = """<?xml version='1.0' encoding="UTF-8"?>
 <WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms"
